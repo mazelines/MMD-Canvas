@@ -9,6 +9,8 @@ import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
 import { parsePmx } from '../src/core/pmx-parser.js';
 import { buildScene } from '../src/core/scene.js';
 import { SoftShadows } from './shadows.js';
+import { collectMaterials } from './material-info.js';
+import { ViewportShading } from './viewport-shading.js';
 
 export const VIEWABLE = ['.pmx', '.fbx', '.glb', '.gltf', '.obj', '.stl', '.ply', '.dae', '.3mf', '.usdz', '.usda', '.usd', '.usdc'];
 
@@ -51,6 +53,8 @@ export class Viewer {
     this.root = new THREE.Group();
     this.scene.add(this.root);
     this.current = null;        // { object, kind, pmx?, sceneData?, materials? }
+    this.renderMode = 'lambert';
+    this.outlineSettings = { width: 1.6, color: '#151923' };
     this.skeleton = null;
     this.flags = { wireframe: false, skeleton: false, grid: true };
     this.loadToken = 0;
@@ -86,6 +90,7 @@ export class Viewer {
       const changed = this.controls.update() || this.needsRender;
       this.needsRender = false;
       if (!changed) return;
+      this.current?.shading?.updateOutlines();
       if (this.shadow.enabled && this.current && this.shadow.dirty) this.updateShadowMap();
       this.renderer.render(this.scene, this.camera);
     };
@@ -93,6 +98,30 @@ export class Viewer {
   }
 
   requestRender() { this.needsRender = true; }
+
+  setRenderMode(mode) {
+    if (!['lambert', 'toon'].includes(mode)) return;
+    this.renderMode = mode;
+    if (this.current) {
+      this.current.shading.apply(mode);
+      this.shadows.patch(this.current.object);
+    }
+    this.invalidateShadows();
+    this.onMaterialsChanged?.();
+  }
+
+  refreshMaterialTextures() {
+    this.current?.shading?.sync();
+    this.invalidateShadows();
+    this.onMaterialsChanged?.();
+  }
+
+  setOutline(width, color) {
+    if (!Number.isFinite(width) || !/^#[0-9a-f]{6}$/i.test(color)) return;
+    this.outlineSettings = { width: Math.min(8, Math.max(0, width)), color };
+    this.current?.shading?.setOutline(this.outlineSettings.width, color);
+    this.requestRender();
+  }
 
   /** Overall light level; 1 = default. Scales all three light sources together. */
   setLightIntensity(k) {
@@ -149,6 +178,7 @@ export class Viewer {
     const gl = this.renderer.getContext();
     const px = new Uint8Array(4);
     const run = () => {
+      this.current?.shading?.updateOutlines();
       if (this.shadow.enabled && this.current) this.updateShadowMap();
       this.renderer.render(this.scene, this.camera);
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
@@ -190,6 +220,7 @@ export class Viewer {
   resize() {
     const w = this.container.clientWidth || 1, h = this.container.clientHeight || 1;
     this.renderer.setSize(w, h);
+    this.current?.shading?.viewport.set(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.requestRender();
@@ -197,7 +228,7 @@ export class Viewer {
 
   clear() {
     if (this.skeleton) { this.scene.remove(this.skeleton); disposeObject(this.skeleton); this.skeleton = null; }
-    if (this.current) { this.root.remove(this.current.object); disposeObject(this.current.object); this.current = null; }
+    if (this.current) { this.current.shading?.dispose(); this.root.remove(this.current.object); disposeObject(this.current.object); this.current = null; }
     this.shadows.clear();
     this.shadow.dirty = false;
     this.requestRender();
@@ -213,6 +244,10 @@ export class Viewer {
     if (token !== this.loadToken) { disposeObject(loaded.object); return null; } // superseded by a newer load
     this.clear();
     this.current = loaded;
+    loaded.materials = collectMaterials(loaded.object);
+    loaded.info.materialNames = loaded.materials.map((entry) => entry.name);
+    loaded.shading = new ViewportShading(loaded.object, new THREE.Vector2(this.container.clientWidth || 1, this.container.clientHeight || 1), this.outlineSettings);
+    loaded.shading.apply(this.renderMode);
     this.root.add(loaded.object);
     this.shadows.patch(loaded.object);
     this.applyFlags();
@@ -239,7 +274,7 @@ export class Viewer {
     geometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
 
     const manager = new THREE.LoadingManager();
-    manager.onLoad = () => { this.invalidateShadows(); this.requestRender(); };
+    manager.onLoad = () => this.refreshMaterialTextures();
     const texLoader = new THREE.TextureLoader(manager);
     const tgaLoader = new TGALoader(manager);
     const ddsLoader = new DDSLoader(manager);
@@ -254,11 +289,14 @@ export class Viewer {
         const loader = ext === '.tga' ? tgaLoader : ext === '.dds' ? ddsLoader : texLoader;
         entry = { listeners: [], hasAlpha: null };
         entry.texture = loader.load(url, (t) => {
+          t.userData.loadStatus = 'loaded';
           t.colorSpace = THREE.SRGBColorSpace;
           entry.hasAlpha = ext === '.dds' ? false : textureUsesAlpha(t);
           entry.listeners.forEach((fn) => fn(entry.hasAlpha));
           this.requestRender();
-        }, undefined, () => { missing.push(rel); });
+        }, undefined, () => { missing.push(rel); entry.texture.userData.loadStatus = 'error'; this.onMaterialsChanged?.(); });
+        entry.texture.userData.sourcePath = rel;
+        entry.texture.userData.loadStatus = 'pending';
         entry.texture.colorSpace = THREE.SRGBColorSpace;
         entry.texture.wrapS = entry.texture.wrapT = THREE.RepeatWrapping;
         cache.set(key, entry);
@@ -275,6 +313,8 @@ export class Viewer {
         transparent: m.alpha < 0.999,
         side: m.doubleSided ? THREE.DoubleSide : THREE.FrontSide,
       });
+      mat.userData.pmx = pmx.materials[materialIndex];
+      mat.userData.pmxTextures = { sphere: m.sphereTexture, toon: m.toonTexture };
       if (m.texture) {
         mat.map = loadTexture(m.texture, (hasAlpha) => {
           if (hasAlpha && !mat.transparent) { mat.transparent = true; mat.alphaTest = 0.02; mat.needsUpdate = true; }
@@ -338,9 +378,10 @@ export class Viewer {
   }
 
   setMaterialVisible(index, visible) {
-    const c = this.current;
-    if (!c || c.kind !== 'pmx') return;
-    c.object.material[index].visible = visible;
+    const entry = this.current?.materials[index];
+    if (!entry) return;
+    entry.material.visible = visible;
+    this.current.shading?.sync();
     this.invalidateShadows();
     this.requestRender();
   }
@@ -351,7 +392,7 @@ export class Viewer {
     const manager = new THREE.LoadingManager();
     manager.addHandler(/\.tga$/i, new TGALoader(manager));
     manager.addHandler(/\.dds$/i, new DDSLoader(manager));
-    manager.onLoad = () => { this.invalidateShadows(); this.requestRender(); };
+    manager.onLoad = () => this.refreshMaterialTextures();
     let object;
     const basic = () => new THREE.MeshStandardMaterial({ color: 0xb8bcc6, roughness: 0.7, metalness: 0.05 });
     switch (ext) {
@@ -514,10 +555,12 @@ export class Viewer {
     this.grid.visible = this.flags.grid;
     if (this.skeleton) this.skeleton.visible = this.flags.skeleton;
     if (this.current) {
+      this.current.materials?.forEach(({ material }) => { if ('wireframe' in material) material.wireframe = this.flags.wireframe; });
       this.current.object.traverse((o) => {
-        if (!o.material) return;
+        if (!o.material || o.userData.viewportOutline) return;
         (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { if ('wireframe' in m) m.wireframe = this.flags.wireframe; });
       });
+      this.current.shading?.sync();
     }
     this.requestRender();
   }
@@ -551,7 +594,7 @@ function makeSunIcon() {
 function countGeometry(object) {
   let vertices = 0, triangles = 0, meshes = 0;
   object.traverse((o) => {
-    if (!o.geometry) return;
+    if (!o.geometry || o.userData.viewportOutline) return;
     meshes++;
     const g = o.geometry;
     vertices += g.attributes.position ? g.attributes.position.count : 0;
