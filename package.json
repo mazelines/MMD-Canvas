@@ -10,12 +10,22 @@
   "scripts": {
     "start": "electron .",
     "convert": "node cli.js",
-    "test": "node tests/run-tests.js"
+    "test": "node tests/run-tests.js",
+    "pack": "electron-builder --dir --publish never",
+    "dist": "electron-builder --publish never"
   },
   "license": "MIT",
+  "author": "mazelines",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mazelines/MMD-Canvas.git"
+  },
   "dependencies": {
-    "electron": "^45.3.0",
     "three": "^0.187.0",
     "three-mesh-bvh": "^0.9.18"
+  },
+  "devDependencies": {
+    "electron": "45.3.0",
+    "electron-builder": "26.18.0"
   }
 }

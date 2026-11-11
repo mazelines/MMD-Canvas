@@ -1,0 +1,29 @@
+appId: com.mazelines.mmdcanvas
+productName: MMD Canvas
+directories:
+  output: dist
+artifactName: MMD-Canvas-${version}-${os}-${arch}.${ext}
+asar: true
+npmRebuild: false
+files:
+  - electron/**/*
+  - renderer/**/*
+  - src/**/*
+  - cli.js
+  - package.json
+  - LICENSE
+win:
+  target: nsis
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+mac:
+  target: zip
+  category: public.app-category.graphics-design
+  identity: null
+linux:
+  target: AppImage
+  category: Graphics
+  maintainer: mazelines
+publish: null
