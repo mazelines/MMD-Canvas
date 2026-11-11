@@ -10,11 +10,24 @@ A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
 
+## Language and workspaces
+
+v0.3.0 adds workspace saving/restoring and a four-language UI. Toon now uses two lighting tones, and both rendering modes use linear compositing with GT7 SDR tone mapping.
+
+The app follows the system language at startup: **Korean, English, Simplified Chinese, or Japanese**, with English as the fallback. Model names, descriptions, and filenames remain unchanged.
+
+Use the workspace bar to open, save, or save as a `.canvas` file. It restores the model and folder, camera, lighting, shading and outlines, material visibility, morphs, and conversion options/output paths. Folder-only batch workspaces are supported. Opening a workspace does not start conversion.
+
+Shortcuts: `Ctrl+S` to save, `Ctrl+Shift+S` to save as, and `Ctrl+Shift+O` to open (`Cmd` on macOS). You can also open `.canvas` files by drag and drop or as a startup argument. Assets are referenced, not embedded; preserve their relative folder structure when moving a workspace. Language is determined by the receiving system, not the workspace.
+
+Run `npm run test:workspace` after `npm test` to verify saving/restoring and all four languages plus the English fallback in Electron.
+
 ## Features
 
+- **Color pipeline:** Linear Rec.709 lighting and compositing in a half-float buffer, followed by GT7 SDR tone mapping and one sRGB output conversion. [Details (Korean)](color-pipeline.md).
 - **File browser:** browse drives and folders, filter by filename or 3D format, navigate with the keyboard, and drag and drop files.
 - **3D viewer:** orbit, pan, zoom, frame the model, toggle grid/bones/wireframe, and control material visibility.
-- **Rendering modes:** standard Lambert shading and simple Toon shading with three lighting bands and adjustable outlines.
+- **Rendering modes:** standard Lambert shading and two-tone Toon shading with adjustable outlines.
 - **Smooth-normal outlines:** vertices at the same position are grouped at runtime to calculate angle-weighted normals across UV seams and hard edges. Original surface normals are preserved. Outline normals are calculated on first use and reused until vertices or morphs change; no extra packed channel is required.
 - **PMX inspection:** vertex, triangle, material, bone, morph, and texture counts; model descriptions and conversion warnings; vertex morph sliders and reset.
 - **Material inspector:** search material/mesh names; inspect color, opacity, roughness, metalness, texture previews, resolution, UV data, material slots, and triangle counts. View original PMX values separately. Toggle individual materials, isolate the selection, or show all, including on non-PMX models. Visibility changes affect previews only.
@@ -29,7 +42,9 @@ Use the **Lambert / Toon** sphere buttons at the top right of the viewport.
 | Mode | Appearance | Useful for |
 | --- | --- | --- |
 | **Standard · Lambert** | Smooth lighting without Toon outlines; the default mode. | Inspecting shape, textures, and lighting |
-| **Simple Toon** | Three lighting bands and silhouette outlines. | Previewing cel shading and character silhouettes |
+| **Simple Toon** | Two lighting tones and silhouette outlines. | Previewing cel shading and character silhouettes |
+
+Toon cast shadows share the unlit face's dark tone instead of darkening it again. Hemisphere fill is constant. Soft PCSS shadow edges interpolate between the two tones; source texture, emission, and AO variations remain visible.
 
 ![Simple Toon mode, light gizmo, and outline controls](images/mmd-canvas-toon-preview.png)
 
@@ -118,6 +133,7 @@ node cli.js --help
 ```bash
 npm test                            # Conversion, shadow, material, and shading tests
 npm run test:ui                     # Run after npm test: PMX/FBX material and Toon UI checks
+npm run test:workspace              # Workspace + ko/en/zh/ja + English fallback
 node tests/run-tests.js --blender    # Additional import validation with Blender installed
 node tests/make-heavy.js             # Dense OBJ for shadow performance checks
 npm run pack                        # Unpacked application
@@ -153,3 +169,5 @@ docs/                 Screenshots, translated READMEs, release guide
 ## License
 
 Code is released under the [MIT License](../LICENSE). Models and textures loaded by users remain subject to their creators' terms.
+
+The GT7 reference implementation notice is in [GT7-MIT.txt](../licenses/GT7-MIT.txt) and is included in distribution packages.

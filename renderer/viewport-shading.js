@@ -18,8 +18,9 @@ export class ViewportShading {
     this.viewport = viewport;
     this.outlineWidth = { value: outline.width };
     this.outlineColor = new THREE.Color(outline.color);
-    this.gradient = new THREE.DataTexture(new Uint8Array([30, 128, 255]), 3, 1, THREE.RedFormat);
-    this.gradient.name = 'Viewport Toon · 3 bands';
+    this.gradient = new THREE.DataTexture(new Uint8Array([64, 255]), 2, 1, THREE.RedFormat);
+    this.gradient.name = 'Viewport Toon · 2 tones';
+    this.gradient.colorSpace = THREE.NoColorSpace; // linear lighting weights, not display colors
     this.gradient.minFilter = this.gradient.magFilter = THREE.NearestFilter;
     this.gradient.generateMipmaps = false;
     this.gradient.needsUpdate = true;

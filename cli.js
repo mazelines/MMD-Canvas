@@ -4,10 +4,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { convertPmxFile, inspectPmxFile, OUTPUT_FORMATS } from './src/core/convert.js';
+import { t } from './src/i18n/index.js';
 
-const HELP = `MMD Converter - PMX -> FBX / USD
-
-사용법:
+const HELP = 'MMD Canvas - PMX -> FBX / USD\n\n' + t(`사용법:
   node cli.js <input.pmx>            [-o out.fbx|out.usda|out.usdz] [옵션]
   node cli.js <폴더>                 [-o 출력폴더] [-f fbx|usda|usdz] [-r] [옵션]
   node cli.js info <input.pmx>
@@ -21,27 +20,27 @@ const HELP = `MMD Converter - PMX -> FBX / USD
       --no-copy-textures 텍스처를 복사하지 않고 원본 경로 참조
       --ascii            USD prim 이름을 ASCII로 강제
   -r, --recursive        폴더 일괄 변환 시 하위 폴더 포함
-`;
+`);
 
 function parseArgs(argv) {
   const a = { inputs: [], options: {} };
   for (let i = 0; i < argv.length; i++) {
-    const t = argv[i];
+    const arg = argv[i];
     const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${t} 옵션에 값이 필요합니다.`);
+      if (i + 1 >= argv.length) throw new Error(t`${arg} 옵션에 값이 필요합니다.`);
       return argv[++i];
     };
-    if (t === '-o' || t === '--out') a.out = next();
-    else if (t === '-f' || t === '--format') a.format = next().toLowerCase();
-    else if (t === '-s' || t === '--scale') a.options.scale = Number(next());
-    else if (t === '-n' || t === '--names') a.options.nameMode = next();
-    else if (t === '--no-morphs') a.options.morphs = false;
-    else if (t === '--no-copy-textures') a.options.copyTextures = false;
-    else if (t === '--ascii') a.options.asciiNames = true;
-    else if (t === '-r' || t === '--recursive') a.recursive = true;
-    else if (t === '-h' || t === '--help') a.help = true;
-    else if (t.startsWith('-')) throw new Error(`알 수 없는 옵션: ${t}`);
-    else a.inputs.push(t);
+    if (arg === '-o' || arg === '--out') a.out = next();
+    else if (arg === '-f' || arg === '--format') a.format = next().toLowerCase();
+    else if (arg === '-s' || arg === '--scale') a.options.scale = Number(next());
+    else if (arg === '-n' || arg === '--names') a.options.nameMode = next();
+    else if (arg === '--no-morphs') a.options.morphs = false;
+    else if (arg === '--no-copy-textures') a.options.copyTextures = false;
+    else if (arg === '--ascii') a.options.asciiNames = true;
+    else if (arg === '-r' || arg === '--recursive') a.recursive = true;
+    else if (arg === '-h' || arg === '--help') a.help = true;
+    else if (arg.startsWith('-')) throw new Error(t`알 수 없는 옵션: ${arg}`);
+    else a.inputs.push(arg);
   }
   return a;
 }
@@ -59,8 +58,7 @@ async function findPmx(dir, recursive) {
 function printResult(r) {
   const s = r.stats;
   console.log(`✔ ${r.output}  (${(r.size / 1024).toFixed(0)} KB)`);
-  console.log(`   정점 ${s.vertices} / 삼각형 ${s.triangles} / 재질 ${s.materials} / 본 ${s.bones} / 모프 ${s.morphs} / 텍스처 ${s.textures}` +
-    (s.missingTextures ? ` (누락 ${s.missingTextures})` : ''));
+  console.log(t`   정점 ${s.vertices} / 삼각형 ${s.triangles} / 재질 ${s.materials} / 본 ${s.bones} / 모프 ${s.morphs} / 텍스처 ${s.textures}${s.missingTextures ? t` (누락 ${s.missingTextures})` : ''}`);
   for (const w of r.warnings) console.log(`   ⚠ ${w}`);
 }
 
@@ -69,13 +67,13 @@ async function main() {
   if (args.help || !args.inputs.length) { console.log(HELP); return args.help ? 0 : 1; }
 
   if (args.inputs[0] === 'info') {
-    if (!args.inputs[1]) throw new Error('info 명령에는 PMX 파일 경로가 필요합니다.');
+    if (!args.inputs[1]) throw new Error(t('info 명령에는 PMX 파일 경로가 필요합니다.'));
     console.log(JSON.stringify(await inspectPmxFile(args.inputs[1]), null, 2));
     return 0;
   }
-  if (args.format && !OUTPUT_FORMATS[args.format]) throw new Error(`알 수 없는 형식: ${args.format}`);
-  if (args.options.scale !== undefined && !(args.options.scale > 0)) throw new Error('scale은 0보다 큰 숫자여야 합니다.');
-  if (args.options.nameMode && !['original', 'english'].includes(args.options.nameMode)) throw new Error('names는 original 또는 english여야 합니다.');
+  if (args.format && !OUTPUT_FORMATS[args.format]) throw new Error(t`알 수 없는 형식: ${args.format}`);
+  if (args.options.scale !== undefined && !(args.options.scale > 0)) throw new Error(t('scale은 0보다 큰 숫자여야 합니다.'));
+  if (args.options.nameMode && !['original', 'english'].includes(args.options.nameMode)) throw new Error(t('names는 original 또는 english여야 합니다.'));
 
   const input = path.resolve(args.inputs[0]);
   const stat = await fs.stat(input);
@@ -84,7 +82,7 @@ async function main() {
   if (stat.isDirectory()) {
     const format = args.format || 'fbx';
     const files = await findPmx(input, args.recursive);
-    if (!files.length) { console.log('PMX 파일을 찾지 못했습니다.'); return 1; }
+    if (!files.length) { console.log(t('PMX 파일을 찾지 못했습니다.')); return 1; }
     const outRoot = args.out ? path.resolve(args.out) : null;
     for (const file of files) {
       const rel = path.relative(input, file);
@@ -93,7 +91,7 @@ async function main() {
       try { printResult(await convertPmxFile(file, target, { ...args.options, format })); }
       catch (e) { failed++; console.error(`✘ ${file}\n   ${e.message}`); }
     }
-    console.log(`\n${files.length - failed}/${files.length}개 변환 완료`);
+    console.log(t`\n${files.length - failed}/${files.length}개 변환 완료`);
   } else {
     const format = args.format || 'fbx';
     const out = args.out || path.join(path.dirname(input), path.basename(input, path.extname(input)) + OUTPUT_FORMATS[format].ext);
@@ -102,4 +100,4 @@ async function main() {
   return failed ? 1 : 0;
 }
 
-main().then((code) => { process.exitCode = code; }, (e) => { console.error(`오류: ${e.message}`); process.exitCode = 1; });
+main().then((code) => { process.exitCode = code; }, (e) => { console.error(t`오류: ${e.message}`); process.exitCode = 1; });

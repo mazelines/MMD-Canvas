@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 // File-level conversion pipeline (Node): PMX file -> FBX / USDA / USDZ file + textures.
 
 import fs from 'node:fs/promises';
@@ -64,10 +65,10 @@ async function resolveTexture(pmxDir, raw) {
 export async function convertPmxFile(inputPath, outputPath, options = {}) {
   const opt = { ...DEFAULT_CONVERT_OPTIONS, ...options };
   const format = opt.format || formatFromPath(outputPath);
-  if (!format || !OUTPUT_FORMATS[format]) throw new Error(`지원하지 않는 출력 형식입니다: ${outputPath}`);
+  if (!format || !OUTPUT_FORMATS[format]) throw new Error(t`지원하지 않는 출력 형식입니다: ${outputPath}`);
   inputPath = path.resolve(inputPath);
   outputPath = path.resolve(outputPath);
-  if (inputPath.toLowerCase() === outputPath.toLowerCase()) throw new Error('입력 파일과 출력 파일이 같습니다.');
+  if (inputPath.toLowerCase() === outputPath.toLowerCase()) throw new Error(t('입력 파일과 출력 파일이 같습니다.'));
 
   const pmx = parsePmx(await fs.readFile(inputPath));
   const scene = buildScene(pmx, opt);
@@ -89,14 +90,14 @@ export async function convertPmxFile(inputPath, outputPath, options = {}) {
   for (const raw of scene.textures) {
     const source = await resolveTexture(pmxDir, raw);
     if (!source) {
-      warnings.push(`텍스처를 찾을 수 없습니다: ${raw}`);
+      warnings.push(t`텍스처를 찾을 수 없습니다: ${raw}`);
       report.push({ source: raw, status: 'missing' });
       continue;
     }
     const ext = path.extname(source).toLowerCase();
     const allowed = format === 'usdz' ? USDZ_TEXTURE_EXT : USD_TEXTURE_EXT;
     if (isUsd && !allowed.has(ext)) {
-      warnings.push(`${format.toUpperCase()}에서 표시되지 않을 수 있는 텍스처 형식입니다 (${ext}): ${raw}`);
+      warnings.push(t`${format.toUpperCase()}에서 표시되지 않을 수 있는 텍스처 형식입니다 (${ext}): ${raw}`);
     }
     const data = await fs.readFile(source);
     const hasAlpha = textureUsesAlpha(data, ext);

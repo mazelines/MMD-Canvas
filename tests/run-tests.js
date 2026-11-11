@@ -2,6 +2,7 @@
 // node tests/run-tests.js --blender  -> additionally imports every output into Blender (if installed)
 
 import assert from 'node:assert/strict';
+import { setLanguage } from '../src/i18n/index.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -16,8 +17,10 @@ import { textureUsesAlpha } from '../src/core/texture-alpha.js';
 import { registerShadowTests } from './shadow-tests.js';
 import { registerMaterialTests } from './material-tests.js';
 import { registerShadingTests } from './shading-tests.js';
+import { registerWorkspaceTests } from './workspace-tests.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+setLanguage('ko'); // Core diagnostics are asserted independently of the host locale.
 const sampleDir = path.join(here, 'sample');
 const outDir = path.join(here, 'out');
 fs.rmSync(outDir, { recursive: true, force: true });
@@ -263,6 +266,7 @@ test('options: no morphs, scale, missing texture, bad input', async () => {
 registerShadowTests(test);
 registerMaterialTests(test);
 registerShadingTests(test);
+registerWorkspaceTests(test);
 for (const run of pending) await run();
 
 if (process.argv.includes('--blender')) {

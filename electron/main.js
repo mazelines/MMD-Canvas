@@ -1,14 +1,18 @@
+import { t, setLanguage } from '../src/i18n/index.js';
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell, Menu } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { convertPmxFile, OUTPUT_FORMATS } from '../src/core/convert.js';
+import { readWorkspace, writeWorkspace, networkPaths } from '../src/core/workspace.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // Test hooks: MMDCONV_OPEN=<file> opens a model at startup, MMDCONV_SHOT=<png> saves a screenshot and quits.
-const OPEN_AT_START = process.env.MMDCONV_OPEN || process.argv.slice(1).find((a) => /\.[a-z0-9]{2,5}$/i.test(a) && !a.startsWith('-') && !a.endsWith('.js')) || null;
+const fileFromArgv = (argv) => argv.slice(1).find((a) => /\.(canvas|[a-z0-9]{2,5})$/i.test(a) && !a.startsWith('-') && !/\.(cjs|mjs|js)$/i.test(a)) || null;
+const OPEN_AT_START = process.env.MMDCONV_OPEN || fileFromArgv(process.argv);
+let pendingOpenFile = OPEN_AT_START, rendererReady = false;
 const SHOT_PATH = process.env.MMDCONV_SHOT || null;
 
 protocol.registerSchemesAsPrivileged([
@@ -16,6 +20,27 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let win = null;
+// Display language the user chose in the OS (the system locale is only the regional format on Windows).
+const systemLanguage = () => process.env.MMDCONV_LOCALE || app.getPreferredSystemLanguages?.()[0] || app.getSystemLocale();
+// One window per user: opening another file (e.g. double-clicking a .canvas) reuses the running app.
+// Automated runs (any MMDCONV_* variable) stay independent so they never hand off to an open app.
+const isTestRun = Object.keys(process.env).some((key) => key.startsWith('MMDCONV_'));
+const hasInstanceLock = isTestRun || app.requestSingleInstanceLock();
+if (!hasInstanceLock) app.quit();
+app.on('second-instance', (_event, argv, workingDirectory) => {
+  const file = fileFromArgv(argv);
+  if (file) {
+    const filePath = path.resolve(workingDirectory, file);
+    if (rendererReady && win) win.webContents.send('app:open-file', filePath);
+    else pendingOpenFile = filePath;
+  }
+  if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
+});
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  if (rendererReady && win) win.webContents.send('app:open-file', filePath);
+  else pendingOpenFile = filePath;
+});
 
 function createWindow() {
   win = new BrowserWindow({
@@ -24,7 +49,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 560,
     backgroundColor: '#16181d',
-    title: 'MMD Converter',
+    title: 'MMD Canvas',
     show: true,
     webPreferences: {
       preload: path.join(ROOT, 'electron', 'preload.cjs'),
@@ -46,6 +71,8 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (!hasInstanceLock) return;
+  setLanguage(systemLanguage());
   protocol.handle('app', async (request) => {
     try {
       const url = new URL(request.url);
@@ -74,14 +101,18 @@ const handle = (channel, fn) => ipcMain.handle(channel, async (_e, ...args) => {
   catch (e) { return { ok: false, error: e.message || String(e) }; }
 });
 
-handle('app:startup', async () => ({
+handle('app:startup', async () => {
+  rendererReady = true;
+  return {
   home: app.getPath('documents'),
-  openFile: OPEN_AT_START ? path.resolve(OPEN_AT_START) : null,
+  locale: systemLanguage(),
+  openFile: pendingOpenFile ? path.resolve(pendingOpenFile) : null,
   formats: OUTPUT_FORMATS,
   testShadow: process.env.MMDCONV_SHADOW || null,
   testGizmo: process.env.MMDCONV_GIZMO || null,
   testConvert: process.env.MMDCONV_TEST_CONVERT ? { output: process.env.MMDCONV_TEST_CONVERT, format: path.extname(process.env.MMDCONV_TEST_CONVERT).slice(1).toLowerCase() } : null,
-}));
+  };
+});
 
 handle('fs:list', async (dir) => {
   dir = path.resolve(dir);
@@ -124,11 +155,46 @@ handle('dialog:openFile', async (defaultPath) => {
     properties: ['openFile'],
     defaultPath: defaultPath || undefined,
     filters: [
-      { name: '3D 모델', extensions: ['pmx', 'fbx', 'glb', 'gltf', 'obj', 'stl', 'ply', 'dae', '3mf', 'usdz', 'usda', 'usd', 'usdc'] },
-      { name: '모든 파일', extensions: ['*'] },
+      { name: t('모델 · 워크스페이스'), extensions: ['canvas', 'pmx', 'fbx', 'glb', 'gltf', 'obj', 'stl', 'ply', 'dae', '3mf', 'usdz', 'usda', 'usd', 'usdc'] },
+      { name: t('3D 모델'), extensions: ['pmx', 'fbx', 'glb', 'gltf', 'obj', 'stl', 'ply', 'dae', '3mf', 'usdz', 'usda', 'usd', 'usdc'] },
+      { name: t('모든 파일'), extensions: ['*'] },
     ],
   });
   return r.canceled ? null : r.filePaths[0];
+});
+
+handle('workspace:open', async (filePath) => {
+  if (!filePath) {
+    const selected = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: t('MMD Canvas 워크스페이스'), extensions: ['canvas'] }] });
+    if (selected.canceled) return null;
+    filePath = selected.filePaths[0];
+  }
+  const data = await readWorkspace(filePath);
+  const remote = networkPaths(data, path.resolve(filePath));
+  if (remote.length) {
+    const answer = await dialog.showMessageBox(win, {
+      type: 'warning', buttons: [t('계속'), t('취소')], defaultId: 1, cancelId: 1, title: t('네트워크 경로 확인'),
+      message: t`이 워크스페이스는 네트워크 위치의 파일을 참조합니다:\n${remote.join('\n')}\n\n신뢰하는 워크스페이스일 때만 계속하세요.`,
+    });
+    if (answer.response !== 0) return null;
+  }
+  if (data.model) {
+    const stat = await fs.stat(data.model.path).catch(() => null);
+    if (!stat?.isFile()) throw new Error(t`모델 파일을 찾을 수 없습니다: ${data.model.path}\n모델을 원래 위치로 복원한 뒤 다시 열어 주세요.`);
+  }
+  return { filePath: path.resolve(filePath), data };
+});
+
+handle('workspace:save', async (data, currentPath, saveAs) => {
+  let filePath = currentPath;
+  if (!filePath || saveAs) {
+    const defaultPath = currentPath || (data.model?.path ? data.model.path.replace(/\.[^./\\]+$/, '') + '.canvas' : path.join(data.browser?.directory || app.getPath('documents'), 'Workspace.canvas'));
+    const selected = await dialog.showSaveDialog(win, { defaultPath, filters: [{ name: t('MMD Canvas 워크스페이스'), extensions: ['canvas'] }] });
+    if (selected.canceled || !selected.filePath) return null;
+    filePath = selected.filePath;
+    if (path.extname(filePath).toLowerCase() !== '.canvas') filePath += '.canvas';
+  }
+  return { filePath: await writeWorkspace(filePath, data) };
 });
 
 handle('dialog:saveFile', async (defaultPath, format) => {

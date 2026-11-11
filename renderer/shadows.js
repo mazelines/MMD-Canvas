@@ -77,10 +77,28 @@ const LIGHTS_CHUNK = THREE.ShaderChunk.lights_fragment_begin.replace(
   DIR_LIGHT_LINE,
   `${DIR_LIGHT_LINE}
 		#if ( UNROLLED_LOOP_INDEX == 0 )
+		#ifdef TOON
+		// Cast shadows converge on the same dark tone as the unlit face.
+		// Multiplying visibility directly would introduce a third, darker tone.
+		float toonBand = getGradientIrradiance( geometryNormal, directLight.direction ).r;
+		#ifdef USE_GRADIENTMAP
+		float toonDark = texture2D( gradientMap, vec2( 0.0 ) ).r;
+		#else
+		float toonDark = 0.7;
+		#endif
+		directLight.color *= mix( toonDark, toonBand, sunShadow( vShWorldPos ) ) / max( toonBand, 0.00001 );
+		#else
 		if ( dot( geometryNormal, directLight.direction ) > 0.0 ) directLight.color *= sunShadow( vShWorldPos );
+		#endif
 		#endif`,
 );
 if (LIGHTS_CHUNK === THREE.ShaderChunk.lights_fragment_begin) console.warn('shadows: three.js light chunk changed, shadows will not be applied');
+
+// A normal-dependent hemisphere fill would add a continuous gradient over both tones.
+const TOON_LIGHTS_CHUNK = LIGHTS_CHUNK.replace(
+  'getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal )',
+  '( hemisphereLights[ i ].skyColor + hemisphereLights[ i ].groundColor ) * 0.5',
+);
 
 const WORLD_POS_VERTEX = /* glsl */`
 	vec4 shWorldPos = vec4( transformed, 1.0 );
@@ -165,9 +183,9 @@ export class SoftShadows {
           shader.vertexShader = 'varying vec3 vShWorldPos;\n' + shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>\n${WORLD_POS_VERTEX}`);
           shader.fragmentShader = shader.fragmentShader
             .replace('#include <common>', `#include <common>\n${SHADOW_GLSL}`)
-            .replace('#include <lights_fragment_begin>', LIGHTS_CHUNK);
+            .replace('#include <lights_fragment_begin>', m.isMeshToonMaterial ? TOON_LIGHTS_CHUNK : LIGHTS_CHUNK);
         };
-        m.customProgramCacheKey = () => 'pcss-shadow';
+        m.customProgramCacheKey = () => m.isMeshToonMaterial ? 'pcss-shadow-toon-two-tone-v2' : 'pcss-shadow';
         m.needsUpdate = true;
       }
     });

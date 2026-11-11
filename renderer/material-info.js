@@ -1,3 +1,4 @@
+import { t } from '../src/i18n/index.js';
 // Keep materials distinct by identity: different materials often share a name.
 export function collectMaterials(object) {
   const entries = [], byMaterial = new Map();
@@ -8,7 +9,7 @@ export function collectMaterials(object) {
       if (!material) return;
       let entry = byMaterial.get(material);
       if (!entry) {
-        entry = { material, name: material.name || '(이름 없음)', usages: [], triangles: 0 };
+        entry = { material, name: material.name || t('(이름 없음)'), usages: [], triangles: 0 };
         byMaterial.set(material, entry);
         entries.push(entry);
       }
@@ -22,7 +23,7 @@ export function collectMaterials(object) {
         if (o.isInstancedMesh) count *= o.count;
       }
       entry.triangles += count;
-      entry.usages.push({ name: o.name || '(이름 없는 오브젝트)', slot, triangles: count, type: o.type });
+      entry.usages.push({ name: o.name || t('(이름 없는 오브젝트)'), slot, triangles: count, type: o.type });
     });
   });
   return entries;
@@ -44,7 +45,7 @@ export function textureInfo(texture) {
     image,
     width: image?.naturalWidth || image?.videoWidth || image?.width || 0,
     height: image?.naturalHeight || image?.videoHeight || image?.height || 0,
-    path: texture.userData.sourcePath || image?.currentSrc || image?.src || texture.name || '모델에 포함된 텍스처',
+    path: texture.userData.sourcePath || image?.currentSrc || image?.src || texture.name || t('모델에 포함된 텍스처'),
     status: texture.userData.loadStatus || (image ? 'loaded' : 'pending'),
   };
 }

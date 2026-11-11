@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 // Turns a parsed PMX into a normalised, exporter-friendly scene:
 //  - right-handed, Y-up (Z negated, triangle winding reversed)
 //  - UV origin bottom-left (v flipped)
@@ -91,7 +92,7 @@ export function buildScene(pmx, options = {}) {
       indexCount: w - start,
     });
   });
-  if (dropped) warnings.push(`범위를 벗어난 정점을 참조하는 삼각형 ${dropped}개를 제외했습니다.`);
+  if (dropped) warnings.push(t`범위를 벗어난 정점을 참조하는 삼각형 ${dropped}개를 제외했습니다.`);
   const finalIndices = indices.subarray(0, w);
 
   // ---- bones ----
@@ -111,7 +112,7 @@ export function buildScene(pmx, options = {}) {
       b.local = [b.position[0] - pp[0], b.position[1] - pp[1], b.position[2] - pp[2]];
     }
   }
-  if (bones.length === 0 && vCount > 0) warnings.push('본이 없는 모델입니다. 스킨 없이 정적 메시로 내보냅니다.');
+  if (bones.length === 0 && vCount > 0) warnings.push(t('본이 없는 모델입니다. 스킨 없이 정적 메시로 내보냅니다.'));
 
   // ---- skinning ----
   const skinIndices = new Int32Array(vCount * 4);
@@ -136,11 +137,11 @@ export function buildScene(pmx, options = {}) {
         skinWeights[i * 4 + k] = entries[k][1] / total;
       }
     }
-    if (fixedSkin) warnings.push(`가중치가 없는 정점 ${fixedSkin}개를 첫 번째 본에 연결했습니다.`);
+    if (fixedSkin) warnings.push(t`가중치가 없는 정점 ${fixedSkin}개를 첫 번째 본에 연결했습니다.`);
   }
   const d = pmx.deformCounts || {};
-  if (d.SDEF) warnings.push(`SDEF 정점 ${d.SDEF}개는 일반 2본 선형 스키닝(BDEF2)으로 변환됩니다.`);
-  if (d.QDEF) warnings.push(`QDEF 정점 ${d.QDEF}개는 일반 4본 선형 스키닝(BDEF4)으로 변환됩니다.`);
+  if (d.SDEF) warnings.push(t`SDEF 정점 ${d.SDEF}개는 일반 2본 선형 스키닝(BDEF2)으로 변환됩니다.`);
+  if (d.QDEF) warnings.push(t`QDEF 정점 ${d.QDEF}개는 일반 4본 선형 스키닝(BDEF4)으로 변환됩니다.`);
 
   // ---- morphs ----
   const morphs = [];
@@ -181,12 +182,12 @@ export function buildScene(pmx, options = {}) {
       keys.forEach((vi, k) => { idx[k] = vi; off.set(target.get(vi), k * 3); });
       morphs.push({ name: names[mi], originalName: m.name, panel: m.panel, indices: idx, offsets: off });
     });
-    const sk = Object.entries(skippedMorphs).map(([k, v]) => `${k} ${v}개`).join(', ');
-    if (sk) warnings.push(`정점 모프가 아닌 모프는 내보내지 않습니다: ${sk}.`);
+    const sk = Object.entries(skippedMorphs).map(([k, v]) => t`${k} ${v}개`).join(', ');
+    if (sk) warnings.push(t`정점 모프가 아닌 모프는 내보내지 않습니다: ${sk}.`);
   }
 
   const usedTextures = [...new Set(materials.map((m) => m.texture).filter(Boolean))];
-  if (pmx.rigidBodyCount) warnings.push(`물리(강체 ${pmx.rigidBodyCount}개, 조인트 ${pmx.jointCount}개)는 FBX/USD로 옮겨지지 않습니다.`);
+  if (pmx.rigidBodyCount) warnings.push(t`물리(강체 ${pmx.rigidBodyCount}개, 조인트 ${pmx.jointCount}개)는 FBX/USD로 옮겨지지 않습니다.`);
 
   return {
     name: pickName(pmx, opt.nameMode) || 'Model',
