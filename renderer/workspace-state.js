@@ -7,12 +7,14 @@ export function captureWorkspace(viewer, state, panel) {
     browser: { directory: state.dir, filter: $('filter-input').value, only3d: $('only-3d').checked },
     model: current ? {
       path: state.loadedPath,
-      materials: current.materials.map((entry) => ({ name: entry.material.name || '', visible: entry.material.visible })),
+      materials: current.materials.map((entry, index) => ({ name: entry.material.name || '', visible: entry.material.visible,
+        emissiveNits: viewer.getMaterialEmission(index)?.override ?? null })),
       morphs: current.info.morphList.map((m, index) => ({ name: m.name, weight: current.morphWeights?.[index] || 0 })),
     } : null,
     viewport: {
+      exposure: { ...viewer.exposure },
       mode: viewer.renderMode, outline: { ...viewer.outlineSettings }, flags: { ...viewer.flags },
-      lightIntensity: viewer.lightLevel, lightDirection: viewer.sun.position.toArray(),
+      lightIntensity: viewer.lightLevel, lightUnit: 'lux', lightDirection: viewer.sun.position.toArray(),
       shadowEnabled: viewer.shadow.enabled, shadowSoftness: viewer.shadow.softness,
       gizmo: $('flag-light-gizmo').checked, gizmoSpace: viewer.lightControls.space,
       gizmoMode: viewer.lightControls.mode, gizmoPosition: viewer.lightRig.position.toArray(),
@@ -38,10 +40,12 @@ export function restoreWorkspaceState(data, viewer, state, panel, applyRenderMod
     $(id).dispatchEvent(new Event(event));
   };
   const v = data.viewport;
+  $('exposure-ev100').value = String(v.exposure.ev100);
+  change('exposure-compensation', v.exposure.compensation, false, 'input');
   applyRenderMode(v.mode);
   applyOutline(v.outline.width, v.outline.color, false);
   for (const [flag, value] of Object.entries(v.flags)) change(`flag-${flag}`, value, true);
-  change('light-intensity', v.lightIntensity, false, 'input');
+  change('light-intensity-number', v.lightIntensity, false, 'input');
   change('flag-shadow', v.shadowEnabled, true);
   change('shadow-softness', v.shadowSoftness / 0.12 * 100, false, 'input');
   viewer.setShadowSoftness(v.shadowSoftness); // the slider snaps to whole steps; keep the saved value exact
@@ -57,7 +61,10 @@ export function restoreWorkspaceState(data, viewer, state, panel, applyRenderMod
     const materials = viewer.current.materials;
     const sameMaterials = materials.length === data.model.materials.length && materials.every((entry, index) => (entry.material.name || '') === data.model.materials[index].name);
     if (sameMaterials) {
-      data.model.materials.forEach((entry, index) => viewer.setMaterialVisible(index, entry.visible));
+      data.model.materials.forEach((entry, index) => {
+        viewer.setMaterialVisible(index, entry.visible);
+        viewer.setMaterialEmission(index, entry.emissiveNits);
+      });
       panel.savedVisibility = data.inspector.soloVisibility?.length === materials.length ? data.inspector.soloVisibility.slice() : null;
     } else changedModel = true;
     const morphs = viewer.current.info.morphList;

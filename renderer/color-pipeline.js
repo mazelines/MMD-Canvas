@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { GT7_GLSL } from './gt7-tonemapping.js';
+import { normalizeExposure, exposureScale } from '../src/core/lighting.js';
 
 // Linear Rec.709 (Linear-sRGB): the default Unreal working-space primaries.
 // Color inputs decode into this space; data textures retain their numeric values.
@@ -22,11 +23,14 @@ export class LinearViewportPipeline {
       stencilBuffer: false,
     });
     this.target.texture.name = 'Viewport Linear Rec.709 HDR';
+    this.exposure = normalizeExposure();
+    this.exposureUniform = { value: exposureScale(this.exposure.ev100, this.exposure.compensation) };
+    this.backgroundColor = new THREE.Color();
     // No built-in material tone mapping: GT7 runs once, after linear compositing.
     this.outputMaterial = new THREE.RawShaderMaterial({
       name: 'GT7 SDR output',
       depthTest: false, depthWrite: false, blending: THREE.NoBlending,
-      uniforms: { tDiffuse: { value: this.target.texture } },
+      uniforms: { tDiffuse: { value: this.target.texture }, viewportExposure: this.exposureUniform },
       vertexShader: /* glsl */`
         precision highp float;
         attribute vec3 position;
@@ -37,12 +41,13 @@ export class LinearViewportPipeline {
       fragmentShader: /* glsl */`
         precision highp float;
         uniform sampler2D tDiffuse;
+        uniform float viewportExposure;
         varying vec2 vUv;
         #include <colorspace_pars_fragment>
         ${GT7_GLSL}
         void main() {
           vec4 hdr = texture2D(tDiffuse, vUv);
-          gl_FragColor = sRGBTransferOETF(vec4(gt7ToneMap(hdr.rgb), hdr.a));
+          gl_FragColor = sRGBTransferOETF(vec4(gt7ToneMap(hdr.rgb * viewportExposure), hdr.a));
         }
       `,
     });
@@ -56,16 +61,45 @@ export class LinearViewportPipeline {
     this.target.setSize(Math.max(1, this.size.x), Math.max(1, this.size.y));
   }
 
+  setExposure(ev100, compensation) {
+    this.exposure = normalizeExposure(ev100, compensation);
+    this.exposureUniform.value = exposureScale(this.exposure.ev100, this.exposure.compensation);
+  }
+
+  /** Editor helpers retain their chosen colors while physical model lighting is exposed. */
+  protectEditorObject(object) {
+    object.traverse(o => {
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+        if (!m || m.userData.fixedViewportExposure) continue;
+        m.userData.fixedViewportExposure = true;
+        const compile = m.onBeforeCompile, cacheKey = m.customProgramCacheKey();
+        m.onBeforeCompile = (shader, renderer) => {
+          compile.call(m, shader, renderer);
+          shader.uniforms.viewportExposure = this.exposureUniform;
+          shader.fragmentShader = 'uniform float viewportExposure;\n' + shader.fragmentShader.replace(
+            '#include <opaque_fragment>', 'outgoingLight = min(outgoingLight / viewportExposure, vec3(65504.0));\n#include <opaque_fragment>');
+        };
+        m.customProgramCacheKey = () => `${cacheKey}-editor-exposure-v1`;
+        m.needsUpdate = true;
+      }
+    });
+  }
+
   render(scene, camera) {
     const renderer = this.renderer;
     const previous = renderer.getRenderTarget();
+    const background = scene.background;
     try {
+      if (background?.isColor) {
+        scene.background = this.backgroundColor.copy(background).multiplyScalar(1 / this.exposureUniform.value);
+        for (const channel of ['r', 'g', 'b']) scene.background[channel] = Math.min(scene.background[channel], 65504);
+      }
       renderer.setRenderTarget(this.target);
       renderer.render(scene, camera);
       // GT7 then one Linear -> sRGB transfer, after blending and MSAA resolve.
       renderer.setRenderTarget(null);
       this.output.render(renderer);
-    } finally { renderer.setRenderTarget(previous); }
+    } finally { scene.background = background; renderer.setRenderTarget(previous); }
   }
 
   dispose() {

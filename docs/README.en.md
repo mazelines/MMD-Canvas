@@ -10,6 +10,14 @@ A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
 
+## What's new in v0.4.0
+
+- **Physical lighting:** directional illuminance in lux, default 10 lux, range 0–200,000. Hidden fill lights and mode-dependent intensity multipliers have been removed.
+- **Manual exposure:** EV100 (-10–24) and compensation (-10–10 EV), default 0 / 0, in the left viewport panel. Exposure does not change physical light intensity.
+- **Material emission:** set reference luminance from 0 to 1,000,000 cd/m² or restore the imported-value conversion. A black emissive color remains black regardless of its reference luminance.
+- **Menus and windows:** File, Convert, View, and Help menus; opening another model or workspace reuses the running window.
+- **Workspace compatibility:** exposure and per-material emission persist in `.canvas`. Legacy light multipliers migrate as value × 6 lux, with the old exposure scale retained. Physical lighting can change the appearance of older scenes.
+
 ## Language and workspaces
 
 v0.3.0 adds workspace saving/restoring and a four-language UI. Toon now uses two lighting tones, and both rendering modes use linear compositing with GT7 SDR tone mapping.
@@ -24,7 +32,9 @@ Run `npm run test:workspace` after `npm test` to verify saving/restoring and all
 
 ## Features
 
+- **Exposure and emission:** manual EV100 and compensation before GT7 (defaults 0 / 0); +1 EV100 halves brightness, +1 compensation doubles it. Set per-material emission reference luminance in cd/m². Both settings persist in `.canvas`; imported materials and export values remain intact.
 - **Color pipeline:** Linear Rec.709 lighting and compositing in a half-float buffer, followed by GT7 SDR tone mapping and one sRGB output conversion. [Details (Korean)](color-pipeline.md).
+- **Physical directional light:** illuminance in lux, default 10 lux; numeric range 0–200,000. Lambert uses reflectance × lux × cosine × shadow visibility / π. Double-click the slider to reset to 10 lux. No hidden fill light or mode-dependent intensity multiplier.
 - **File browser:** browse drives and folders, filter by filename or 3D format, navigate with the keyboard, and drag and drop files.
 - **3D viewer:** orbit, pan, zoom, frame the model, toggle grid/bones/wireframe, and control material visibility.
 - **Rendering modes:** standard Lambert shading and two-tone Toon shading with adjustable outlines.
@@ -44,7 +54,7 @@ Use the **Lambert / Toon** sphere buttons at the top right of the viewport.
 | **Standard · Lambert** | Smooth lighting without Toon outlines; the default mode. | Inspecting shape, textures, and lighting |
 | **Simple Toon** | Two lighting tones and silhouette outlines. | Previewing cel shading and character silhouettes |
 
-Toon cast shadows share the unlit face's dark tone instead of darkening it again. Hemisphere fill is constant. Soft PCSS shadow edges interpolate between the two tones; source texture, emission, and AO variations remain visible.
+Toon cast shadows share the unlit face's dark tone instead of darkening it again. No automatic hemisphere fill is applied. Soft PCSS shadow edges interpolate between the two tones; source texture, emission, and AO variations remain visible.
 
 ![Simple Toon mode, light gizmo, and outline controls](images/mmd-canvas-toon-preview.png)
 

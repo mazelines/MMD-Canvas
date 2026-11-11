@@ -1,5 +1,6 @@
 import { t, formatNumber } from '../src/i18n/index.js';
 import { TEXTURE_SLOTS, textureInfo } from './material-info.js';
+import { MAX_EMISSIVE_NITS } from '../src/core/lighting.js';
 
 const node = (tag, props = {}, ...children) => {
   const element = Object.assign(document.createElement(tag), props);
@@ -110,8 +111,24 @@ export class MaterialPanel {
       swatch.style.backgroundColor = color;
       row(label, node('span', { className: 'color-value' }, swatch, color));
     }
-    for (const [key, label] of [['opacity', t('불투명도')], ['roughness', t('거칠기')], ['metalness', t('금속성')], ['shininess', t('광택')], ['emissiveIntensity', t('발광 강도')], ['ior', t('굴절률')], ['transmission', t('투과')], ['clearcoat', t('클리어코트')], ['alphaTest', t('알파 컷오프')]]) {
+    for (const [key, label] of [['opacity', t('불투명도')], ['roughness', t('거칠기')], ['metalness', t('금속성')], ['shininess', t('광택')], ['emissiveIntensity', t('원본 발광 배율')], ['ior', t('굴절률')], ['transmission', t('투과')], ['clearcoat', t('클리어코트')], ['alphaTest', t('알파 컷오프')]]) {
       if (typeof m[key] === 'number') row(label, number(m[key]));
+    }
+    const emission = this.viewer.getMaterialEmission(this.selected);
+    if (emission) {
+      const selected = this.selected;
+      const input = node('input', { id: 'material-emissive-nits', type: 'number', min: '0', max: String(MAX_EMISSIVE_NITS), step: '0.1', value: String(emission.nits),
+        title: t('흰색 발광 기준 휘도입니다. 실제 휘도는 발광 색상과 텍스처에 따라 달라집니다.') });
+      input.setAttribute('aria-label', t('발광 기준 휘도 (cd/m²)'));
+      const reset = node('button', { id: 'material-emissive-reset', textContent: '↺', title: t('원본 발광 설정 복원'), disabled: emission.override === null });
+      input.addEventListener('input', () => {
+        if (!Number.isFinite(input.valueAsNumber)) return;
+        this.viewer.setMaterialEmission(selected, input.valueAsNumber);
+        input.value = String(this.viewer.getMaterialEmission(selected).nits); reset.disabled = false;
+      });
+      input.addEventListener('blur', () => { input.value = String(this.viewer.getMaterialEmission(selected).nits); });
+      reset.addEventListener('click', () => { this.viewer.setMaterialEmission(selected, null); this.renderDetail(); });
+      row(t('발광 기준 휘도'), node('span', { className: 'emission-control' }, input, node('span', { textContent: 'cd/m²' }), reset));
     }
     row(t('투명 처리'), yes(m.transparent));
     row(t('면 표시'), [t('앞면'), t('뒷면'), t('양면')][m.side] || String(m.side));

@@ -23,6 +23,9 @@ const os = require('node:os');
   const timeout = setTimeout(() => { console.error('Material UI test timed out'); app.exit(1); }, 45000);
   app.on('browser-window-created', (_event, win) => {
     const capture = async () => {
+      // DOM assertions can finish before Chromium submits the updated compositor frame.
+      await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+      await new Promise(resolve => setTimeout(resolve, 100));
       for (let attempt = 0; ; attempt++) {
         try { return await win.webContents.capturePage(); }
         catch (error) {
@@ -39,6 +42,26 @@ const os = require('node:os');
           const check = (condition, message) => { if (!condition) throw new Error(message); };
           const wait = async (predicate) => { for (let i = 0; i < 200; i++) { if (predicate()) return; await new Promise(r => setTimeout(r, 50)); } throw new Error('Renderer wait timed out'); };
           await wait(() => window.__viewer?.current && $('materials').children.length === 2);
+          check(__viewer.lightLevel === 10 && __viewer.sun.intensity === 10, 'default directional light is 10 lux');
+          check(__viewer.exposure.ev100 === 0 && __viewer.exposure.compensation === 0, 'manual exposure defaults');
+          check(__viewer.grid.material.userData.fixedViewportExposure, 'model-framed grid retains editor exposure handling');
+          $('exposure-ev100').value='2'; $('exposure-ev100').dispatchEvent(new Event('input'));
+          $('exposure-compensation').value='1'; $('exposure-compensation').dispatchEvent(new Event('input'));
+          check(__viewer.colorPipeline.exposureUniform.value===50 && __viewer.sun.intensity===10, 'exposure controls adjust output without changing lux');
+          $('exposure-reset').click();
+          check(__viewer.exposure.ev100===0 && JSON.parse(localStorage.getItem('viewportExposure')).ev100===0, 'exposure reset persists');
+          check($('light-value').textContent === 'lux' && $('light-intensity-number').value === '10', 'lux controls show physical default');
+          $('light-intensity-number').value = '12000'; $('light-intensity-number').dispatchEvent(new Event('input'));
+          check(__viewer.sun.intensity === 12000 && Number($('light-intensity').max) >= 12000, 'numeric lux supports daylight values');
+          $('light-intensity').dispatchEvent(new MouseEvent('dblclick'));
+          check(__viewer.sun.intensity === 10 && $('light-intensity-number').value === '10', 'reset restores 10 lux');
+          for (const mode of ['toon', 'lambert']) {
+            __viewer.setRenderMode(mode);
+            for (const enabled of [false, true]) {
+              __viewer.setShadows(enabled);
+              check(__viewer.sun.intensity === 10 && __viewer.hemi.intensity === 0, 'shading and shadows preserve physical light');
+            }
+          }
           $('tab-materials').click();
           await wait(() => $('material-detail').querySelector('.texture-thumb canvas'));
           check(!$('inspector-materials').hidden, 'material tab opens');
@@ -127,6 +150,9 @@ const os = require('node:os');
           const pane = document.getElementById('inspector-materials');
           const bounds = pane.getBoundingClientRect();
           if (bounds.right > innerWidth + 1 || pane.scrollWidth > pane.clientWidth + 1) throw new Error('Narrow inspector overflows: ' + JSON.stringify({right: bounds.right, width: innerWidth, scroll: pane.scrollWidth, client: pane.clientWidth}));
+          const exposure = document.querySelector('.exposure-controls').getBoundingClientRect();
+          const modes = document.querySelector('.viewport-modes').getBoundingClientRect();
+          if (exposure.right > modes.left && exposure.left < modes.right && exposure.bottom > modes.top && exposure.top < modes.bottom) throw new Error('Exposure overlaps shading controls');
           const tab = document.getElementById('tab-materials');
           tab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
           if (document.getElementById('inspector-overview').hidden) throw new Error('Keyboard tab navigation');

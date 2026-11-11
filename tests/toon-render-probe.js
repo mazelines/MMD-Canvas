@@ -12,9 +12,9 @@ export function probeToonRendering() {
   scene.background = new THREE.Color(0);
   const camera = new THREE.OrthographicCamera(-3, 3, 1.5, -1.5, 0.1, 20);
   camera.position.z = 10;
-  const sun = new THREE.DirectionalLight(0xffffff, 1.8);
+  const sun = new THREE.DirectionalLight(0xffffff, 180);
   sun.position.set(1, 0, 1);
-  scene.add(sun, new THREE.HemisphereLight(0xffffff, 0xb4b8c0, 1.3));
+  scene.add(sun, new THREE.HemisphereLight(0xffffff, 0xb4b8c0, 130));
   const shadows = new SoftShadows(renderer);
   const source = new THREE.MeshLambertMaterial({ color: 0xaaaaaa });
   const sphere = new THREE.Mesh(new THREE.SphereGeometry(1.2, 96, 64), source);
