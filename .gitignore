@@ -1,3 +1,38 @@
+# JavaScript / Node.js / Electron
 node_modules/
-tests/out/
-tests/sample/
+.npm/
+.cache/
+coverage/
+.nyc_output/
+*.log
+/dist/
+/out/
+/release/
+
+# Python (Blender validation scripts)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Generated test fixtures and conversion outputs
+/tests/out/
+/tests/sample/
+
+# Local environment settings (keep shareable templates)
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+
+# OS and editor temporary files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
