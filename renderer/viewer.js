@@ -13,7 +13,7 @@ import { SoftShadows } from './shadows.js';
 import { collectMaterials } from './material-info.js';
 import { ViewportShading } from './viewport-shading.js';
 import { LinearViewportPipeline } from './color-pipeline.js';
-import { DEFAULT_LIGHT_LUX, clampLightLux } from '../src/core/lighting.js';
+import { DEFAULT_LIGHT_LUX, DEFAULT_AMBIENT_LUX, clampLightLux } from '../src/core/lighting.js';
 
 export const VIEWABLE = ['.pmx', '.fbx', '.glb', '.gltf', '.obj', '.stl', '.ply', '.dae', '.3mf', '.usdz', '.usda', '.usd', '.usdc'];
 
@@ -45,8 +45,8 @@ export class Viewer {
     this.controls.dampingFactor = 0.12;
     this.controls.addEventListener('change', () => this.requestRender());
 
-    // No implicit sky/fill energy: the lux control measures the directional light only.
-    this.hemi = new THREE.HemisphereLight(0xffffff, 0xb4b8c0, 0);
+    // The fill is a separate, visible setting: the lux control still measures the directional light only.
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0xb4b8c0, DEFAULT_AMBIENT_LUX);
     this.sun = new THREE.DirectionalLight(0xffffff, DEFAULT_LIGHT_LUX);
     this.sun.position.set(-0.4, 1, 0.8);
     this.scene.add(this.hemi, this.sun);
@@ -70,6 +70,7 @@ export class Viewer {
     this.scene.add(this.shadows.ground);
     this.shadow = { enabled: false, softness: 0.03, dirty: false };
     this.lightLevel = DEFAULT_LIGHT_LUX;
+    this.ambientLevel = DEFAULT_AMBIENT_LUX;
 
     // light direction gizmo: a sun icon + rotate handles, like a directional light in an engine editor
     this.lightRig = makeSunIcon();
@@ -136,6 +137,13 @@ export class Viewer {
   setLightIntensity(lux) {
     this.lightLevel = clampLightLux(lux);
     this.sun.intensity = this.lightLevel;
+    this.requestRender();
+  }
+
+  /** Hemisphere fill illuminance in lux (0 = none: unlit faces go black). */
+  setAmbientIntensity(lux) {
+    this.ambientLevel = Number.isFinite(lux) ? clampLightLux(lux) : DEFAULT_AMBIENT_LUX;
+    this.hemi.intensity = this.ambientLevel;
     this.requestRender();
   }
 

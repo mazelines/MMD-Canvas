@@ -5,7 +5,10 @@ import { randomUUID } from 'node:crypto';
 import { MAX_LIGHT_LUX, legacyLightToLux, LEGACY_EV100, MIN_EV100, MAX_EV100, MAX_EXPOSURE_COMPENSATION, MAX_EMISSIVE_NITS } from './lighting.js';
 
 export const WORKSPACE_FORMAT = 'mmd-canvas-workspace';
-export const WORKSPACE_VERSION = 1;
+// 1: light as a 0..3 multiplier (some v1 files already carry lux + exposure). 2: photometric units.
+// Older apps reject version 2 as unsupported instead of misreading its values.
+export const WORKSPACE_VERSION = 2;
+const READABLE_VERSIONS = [1, 2];
 const MAX_BYTES = 8 * 1024 * 1024;
 const fail = (field) => { throw new Error(t`올바르지 않은 워크스페이스 항목: ${field}`); };
 const object = (v, field) => v && typeof v === 'object' && !Array.isArray(v) ? v : fail(field);
@@ -21,7 +24,7 @@ const nullablePath = (v, field) => v === null ? null : string(v, field);
 export function validateWorkspace(value) {
   const d = object(value, t('파일'));
   if (d.format !== WORKSPACE_FORMAT) throw new Error(t('MMD Canvas 워크스페이스 파일이 아닙니다.'));
-  if (d.version !== WORKSPACE_VERSION) throw new Error(t`지원하지 않는 .canvas 버전입니다: ${d.version}`);
+  if (!READABLE_VERSIONS.includes(d.version)) throw new Error(t`지원하지 않는 .canvas 버전입니다: ${d.version}`);
   const b = object(d.browser, 'browser'), v = object(d.viewport, 'viewport');
   const c = object(d.conversion, 'conversion'), i = object(d.inspector, 'inspector');
   const camera = object(v.camera, 'camera'), outline = object(v.outline, 'outline'), flags = object(v.flags, 'flags');
@@ -39,6 +42,8 @@ export function validateWorkspace(value) {
       lightUnit: v.lightUnit === undefined ? 'lux' : choice(v.lightUnit, 'lightUnit', ['lux']),
       lightIntensity: v.lightUnit === undefined ? legacyLightToLux(number(v.lightIntensity, 'lightIntensity', 0, 3))
         : number(v.lightIntensity, 'lightIntensity', 0, MAX_LIGHT_LUX),
+      // 3. ambient fill; files written before it existed had none
+      ambientIntensity: v.ambientIntensity === undefined ? 0 : number(v.ambientIntensity, 'ambientIntensity', 0, MAX_LIGHT_LUX),
       lightDirection: vector(v.lightDirection, 'lightDirection'),
       shadowEnabled: bool(v.shadowEnabled, 'shadowEnabled'), shadowSoftness: number(v.shadowSoftness, 'shadowSoftness', 0, 0.12),
       gizmo: bool(v.gizmo, 'gizmo'), gizmoSpace: choice(v.gizmoSpace, 'gizmoSpace', ['local', 'world']),

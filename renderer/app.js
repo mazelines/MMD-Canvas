@@ -2,7 +2,7 @@ import { t, setLanguage, getLanguage, formatNumber, translateStatic } from '../s
 import { Viewer, VIEWABLE } from './viewer.js';
 import { MaterialPanel } from './material-panel.js';
 import { captureWorkspace, restoreWorkspaceState } from './workspace-state.js';
-import { DEFAULT_LIGHT_LUX, DEFAULT_EV100, clampLightLux, legacyLightToLux } from '../src/core/lighting.js';
+import { DEFAULT_LIGHT_LUX, DEFAULT_AMBIENT_LUX, DEFAULT_EV100, clampLightLux, legacyLightToLux } from '../src/core/lighting.js';
 
 const api = window.api;
 const startup = await api.startup();
@@ -300,12 +300,14 @@ $('btn-reset-morphs').addEventListener('click', () => {
   const apply = (ev100, offset, save) => {
     if (!Number.isFinite(ev100) || !Number.isFinite(offset)) return;
     viewer.setExposure(ev100, offset);
-    ev.value = String(viewer.exposure.ev100); compensation.value = String(viewer.exposure.compensation);
+    // Rewriting the focused field on every keystroke would eat "-" and "." while a number is being typed.
+    if (document.activeElement !== ev) ev.value = String(viewer.exposure.ev100);
+    if (document.activeElement !== compensation) compensation.value = String(viewer.exposure.compensation);
     if (save && !state.restoring) localStorage.setItem('viewportExposure', JSON.stringify(viewer.exposure));
   };
   for (const input of [ev, compensation]) {
     input.addEventListener('input', () => apply(ev.valueAsNumber, compensation.valueAsNumber, true));
-    input.addEventListener('blur', () => apply(viewer.exposure.ev100, viewer.exposure.compensation, false));
+    input.addEventListener('blur', () => { ev.value = String(viewer.exposure.ev100); compensation.value = String(viewer.exposure.compensation); });
   }
   $('exposure-reset').addEventListener('click', () => apply(DEFAULT_EV100, 0, true));
   try {
@@ -327,7 +329,8 @@ for (const flag of ['grid', 'skeleton', 'wireframe']) {
     if (!Number.isFinite(value)) return;
     const lux = clampLightLux(value);
     slider.max = String(Math.max(100, Math.ceil(lux / 100) * 100));
-    slider.value = input.value = String(lux);
+    slider.value = String(lux);
+    if (document.activeElement !== input) input.value = String(lux); // see the exposure fields
     viewer.setLightIntensity(lux);
     if (save && !state.restoring) localStorage.setItem('lightIlluminanceLux', String(lux));
   };
@@ -337,9 +340,24 @@ for (const flag of ['grid', 'skeleton', 'wireframe']) {
     : legacy !== null && Number.isFinite(Number(legacy)) ? legacyLightToLux(Number(legacy)) : DEFAULT_LIGHT_LUX;
   slider.addEventListener('input', () => apply(slider.valueAsNumber, true));
   input.addEventListener('input', () => apply(input.valueAsNumber, true));
-  input.addEventListener('blur', () => apply(viewer.lightLevel, false));
+  input.addEventListener('blur', () => { input.value = String(viewer.lightLevel); });
   slider.addEventListener('dblclick', () => apply(DEFAULT_LIGHT_LUX, true));
   apply(initial, false);
+}
+{
+  // ambient fill (lux)
+  const input = $('light-ambient-number');
+  const apply = (value, save) => {
+    if (!Number.isFinite(value)) return;
+    viewer.setAmbientIntensity(value);
+    if (document.activeElement !== input) input.value = String(viewer.ambientLevel);
+    if (save && !state.restoring) localStorage.setItem('ambientIlluminanceLux', String(viewer.ambientLevel));
+  };
+  input.addEventListener('input', () => apply(input.valueAsNumber, true));
+  input.addEventListener('blur', () => { input.value = String(viewer.ambientLevel); });
+  input.addEventListener('dblclick', () => { input.blur(); apply(DEFAULT_AMBIENT_LUX, true); });
+  const saved = localStorage.getItem('ambientIlluminanceLux');
+  apply(saved !== null && Number.isFinite(Number(saved)) ? Number(saved) : DEFAULT_AMBIENT_LUX, false);
 }
 {
   // soft shadows: toggle + softness (0..100 -> tan of the light's angular radius)

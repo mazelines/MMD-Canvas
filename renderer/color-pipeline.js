@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
-import { GT7_GLSL } from './gt7-tonemapping.js';
+import { GT7_GLSL, GT7_INVERSE_GLSL, gt7InverseDisplay } from './gt7-tonemapping.js';
 import { normalizeExposure, exposureScale } from '../src/core/lighting.js';
 
 // Linear Rec.709 (Linear-sRGB): the default Unreal working-space primaries.
@@ -76,10 +76,11 @@ export class LinearViewportPipeline {
         m.onBeforeCompile = (shader, renderer) => {
           compile.call(m, shader, renderer);
           shader.uniforms.viewportExposure = this.exposureUniform;
-          shader.fragmentShader = 'uniform float viewportExposure;\n' + shader.fragmentShader.replace(
-            '#include <opaque_fragment>', 'outgoingLight = min(outgoingLight / viewportExposure, vec3(65504.0));\n#include <opaque_fragment>');
+          // undo both the exposure and the tone curve, so the helper shows the colour it was given
+          shader.fragmentShader = `uniform float viewportExposure;\n${GT7_GLSL}\n${GT7_INVERSE_GLSL}\n` + shader.fragmentShader.replace(
+            '#include <opaque_fragment>', 'outgoingLight = min(gt7InverseDisplay(outgoingLight) / viewportExposure, vec3(65504.0));\n#include <opaque_fragment>');
         };
-        m.customProgramCacheKey = () => `${cacheKey}-editor-exposure-v1`;
+        m.customProgramCacheKey = () => `${cacheKey}-editor-exposure-v2`;
         m.needsUpdate = true;
       }
     });
@@ -91,8 +92,8 @@ export class LinearViewportPipeline {
     const background = scene.background;
     try {
       if (background?.isColor) {
-        scene.background = this.backgroundColor.copy(background).multiplyScalar(1 / this.exposureUniform.value);
-        for (const channel of ['r', 'g', 'b']) scene.background[channel] = Math.min(scene.background[channel], 65504);
+        scene.background = this.backgroundColor.copy(background);
+        for (const channel of ['r', 'g', 'b']) scene.background[channel] = Math.min(gt7InverseDisplay(scene.background[channel]) / this.exposureUniform.value, 65504);
       }
       renderer.setRenderTarget(this.target);
       renderer.render(scene, camera);

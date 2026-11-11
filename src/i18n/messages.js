@@ -280,4 +280,7 @@ export const messages = {
   "개발자 도구": ["Developer tools", "开发者工具", "開発者ツール"],
   "MMD Canvas 정보": ["About MMD Canvas", "关于 MMD Canvas", "MMD Canvas について"],
   "버전 {0}": ["Version {0}", "版本 {0}", "バージョン {0}"],
+  "주변광": ["Ambient", "环境光", "環境光"],
+  "주변광 조도 (lux)": ["Ambient illuminance (lux)", "环境光照度（lux）", "環境光の照度（lux）"],
+  "주변광 조도 (lux) — 방향광이 닿지 않는 면을 밝히는 하늘·바닥 빛. 0이면 검게 나옵니다.": ["Ambient illuminance (lux) — sky/ground light for faces the directional light does not reach. At 0 they are black.", "环境光照度（lux）— 照亮方向光照不到的面的天空/地面光。为 0 时这些面为黑色。", "環境光の照度（lux）— ディレクショナルライトが当たらない面を照らす空・地面の光。0 では黒くなります。"],
 };
