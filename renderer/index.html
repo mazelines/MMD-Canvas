@@ -58,6 +58,24 @@
 
     <section id="viewport">
       <div id="canvas-host"></div>
+      <div class="viewport-modes" role="group" aria-label="뷰포트 렌더링 모드">
+        <div class="viewport-mode-buttons">
+        <button id="mode-lambert" class="viewport-mode" data-mode="lambert" aria-label="Lambert 렌더링" aria-pressed="true" title="Lambert — 부드러운 명암">
+          <svg viewBox="0 0 32 32" aria-hidden="true"><defs><radialGradient id="lambert-sphere" cx="30%" cy="25%" r="78%"><stop offset="0" stop-color="#f2f6ff"/><stop offset=".34" stop-color="#bbc9df"/><stop offset=".73" stop-color="#677b9b"/><stop offset="1" stop-color="#29364c"/></radialGradient></defs><circle cx="16" cy="16" r="13" fill="url(#lambert-sphere)" stroke="#a5b7cf" stroke-opacity=".45"/></svg>
+          <span>Lambert</span>
+        </button>
+        <button id="mode-toon" class="viewport-mode" data-mode="toon" aria-label="Toon 렌더링과 아웃라인" aria-pressed="false" title="Toon — 단계형 명암과 Smooth Normal 헐 아웃라인">
+          <svg viewBox="0 0 32 32" aria-hidden="true"><defs><clipPath id="toon-sphere-clip"><circle cx="16" cy="16" r="13"/></clipPath></defs><g clip-path="url(#toon-sphere-clip)"><circle cx="16" cy="16" r="13" fill="#34445e"/><ellipse cx="11" cy="11" rx="15" ry="14" fill="#8dabc9"/><ellipse cx="8" cy="7" rx="12" ry="11" fill="#e3efff"/></g><circle cx="16" cy="16" r="13" fill="none" stroke="#101722" stroke-width="2"/></svg>
+          <span>Toon</span>
+        </button>
+        </div>
+        <section id="toon-settings" class="toon-settings" aria-label="Toon 아웃라인 설정" hidden>
+          <div class="toon-settings-heading"><h3>아웃라인</h3><button id="outline-reset" title="아웃라인 기본값 복원" aria-label="아웃라인 기본값 복원">↺</button></div>
+          <div class="outline-width-row"><label for="outline-width">두께</label><input id="outline-width-number" type="number" min="0" max="8" step="0.1" value="1.6" aria-label="아웃라인 두께 수치"><span>px</span></div>
+          <input id="outline-width" type="range" min="0" max="8" step="0.1" value="1.6" aria-label="아웃라인 두께">
+          <div class="outline-color-row"><label for="outline-color">색상</label><input id="outline-color" type="color" value="#151923" aria-label="아웃라인 색상"><output id="outline-color-value">#151923</output></div>
+        </section>
+      </div>
       <div id="empty-hint">
         <div class="hint-title">3D 파일을 열어 보세요</div>
         <div>왼쪽 목록에서 파일을 선택하거나, 창으로 끌어다 놓으세요.</div>
@@ -68,6 +86,11 @@
     </section>
 
     <aside id="inspector">
+      <div class="inspector-tabs" role="tablist" aria-label="모델 검사">
+        <button class="inspector-tab" id="tab-overview" role="tab" aria-selected="true" aria-controls="inspector-overview">모델 정보</button>
+        <button class="inspector-tab" id="tab-materials" role="tab" tabindex="-1" aria-selected="false" aria-controls="inspector-materials">머티리얼 <span id="material-tab-count">0</span></button>
+      </div>
+      <div id="inspector-overview" role="tabpanel" aria-labelledby="tab-overview">
       <section class="panel">
         <h2>모델 정보</h2>
         <div id="info" class="info-grid"><div class="muted">열린 모델이 없습니다.</div></div>
@@ -76,18 +99,34 @@
         <h2>참고</h2>
         <ul id="warnings" class="warn-list"></ul>
       </section>
-      <section class="panel" id="panel-materials" hidden>
-        <h2>재질 <span class="count" id="material-count"></span></h2>
-        <ul id="materials" class="check-list"></ul>
-      </section>
       <section class="panel" id="panel-morphs" hidden>
         <h2>모프 <span class="count" id="morph-count"></span><button id="btn-reset-morphs" class="link">초기화</button></h2>
         <div id="morphs"></div>
       </section>
+      </div>
+      <div id="inspector-materials" role="tabpanel" aria-labelledby="tab-materials" hidden>
+        <div class="material-browser">
+          <label class="material-search-label" for="material-search">재질 찾기 <span id="material-results">0 / 0개</span></label>
+          <input id="material-search" type="text" placeholder="재질 이름, 종류, 메시 검색" spellcheck="false">
+          <ul id="materials" aria-label="재질 목록"></ul>
+          <div class="material-actions">
+            <button id="material-solo" disabled aria-pressed="false">선택만 보기</button>
+            <button id="material-show-all" disabled>모두 표시</button>
+          </div>
+          <div class="material-note">표시 설정은 현재 미리보기에만 적용됩니다.</div>
+        </div>
+        <div id="material-detail"></div>
+      </div>
     </aside>
   </main>
 
   <footer id="statusbar"><span id="status-text">준비됨</span></footer>
+
+  <dialog id="texture-dialog" aria-labelledby="texture-title">
+    <div class="texture-dialog-header"><h2 id="texture-title">텍스처</h2><button id="texture-close">닫기</button></div>
+    <div id="texture-preview"></div>
+    <p id="texture-meta"></p>
+  </dialog>
 
   <dialog id="convert-dialog">
     <form method="dialog" id="convert-form">

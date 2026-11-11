@@ -156,7 +156,7 @@ export class SoftShadows {
   patch(object) {
     const uniforms = this.uniforms;
     object.traverse((o) => {
-      if (!o.isMesh || !o.material) return;
+      if (!o.isMesh || !o.material || o.userData.viewportOutline) return;
       for (const m of materialsOf(o)) {
         if (!m || !isLit(m) || m.userData.shPatched) continue;
         m.userData.shPatched = true;
@@ -264,6 +264,7 @@ export class SoftShadows {
     // swap in depth materials, hide non-mesh helpers of the model (points, lines)
     const swapped = [], hidden = [];
     object.traverse((o) => {
+      if (o.userData.viewportOutline) { if (o.visible) { hidden.push(o); o.visible = false; } return; }
       if (!o.material) return;
       if (!o.isMesh) { if (o.visible) { hidden.push(o); o.visible = false; } return; }
       swapped.push(o, o.material);

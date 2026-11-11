@@ -1,4 +1,5 @@
 import { Viewer, VIEWABLE } from './viewer.js';
+import { MaterialPanel } from './material-panel.js';
 
 const api = window.api;
 const $ = (id) => document.getElementById(id);
@@ -9,6 +10,53 @@ const el = (tag, props = {}, ...children) => {
 };
 
 const viewer = new Viewer($('canvas-host'));
+const materialPanel = new MaterialPanel(viewer);
+const applyRenderMode = (mode, save = false) => {
+  viewer.setRenderMode(mode);
+  $('toon-settings').hidden = viewer.renderMode !== 'toon';
+  document.querySelectorAll('.viewport-mode').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.mode === viewer.renderMode)));
+  if (save) localStorage.setItem('viewportRenderMode', viewer.renderMode);
+};
+document.querySelectorAll('.viewport-mode').forEach((button) => button.addEventListener('click', () => applyRenderMode(button.dataset.mode, true)));
+applyRenderMode(localStorage.getItem('viewportRenderMode') === 'toon' ? 'toon' : 'lambert');
+const applyOutline = (width, color, save = true) => {
+  viewer.setOutline(width, color);
+  const settings = viewer.outlineSettings;
+  $('outline-width').value = String(settings.width);
+  $('outline-width-number').value = String(settings.width);
+  $('outline-color').value = settings.color;
+  $('outline-color-value').textContent = settings.color.toUpperCase();
+  if (save) localStorage.setItem('viewportOutline', JSON.stringify(settings));
+};
+for (const id of ['outline-width', 'outline-width-number']) {
+  $(id).addEventListener('input', () => {
+    if ($(id).value !== '') applyOutline(Number($(id).value), $('outline-color').value);
+  });
+  $(id).addEventListener('change', () => applyOutline(Number($(id).value), $('outline-color').value));
+}
+$('outline-color').addEventListener('input', () => applyOutline(Number($('outline-width').value), $('outline-color').value));
+$('outline-reset').addEventListener('click', () => applyOutline(1.6, '#151923'));
+try {
+  const settings = JSON.parse(localStorage.getItem('viewportOutline') || 'null');
+  if (settings) applyOutline(settings.width, settings.color, false);
+} catch { /* ignore invalid stored settings */ }
+for (const tab of document.querySelectorAll('.inspector-tab')) {
+  tab.addEventListener('keydown', (event) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const tabs = [...document.querySelectorAll('.inspector-tab')];
+    const target = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs.at(-1) : tabs[(tabs.indexOf(tab) + 1) % tabs.length];
+    target.click(); target.focus();
+  });
+  tab.addEventListener('click', () => {
+    for (const other of document.querySelectorAll('.inspector-tab')) {
+      const selected = other === tab;
+      other.setAttribute('aria-selected', String(selected));
+      other.tabIndex = selected ? 0 : -1;
+      $(other.getAttribute('aria-controls')).hidden = !selected;
+    }
+  });
+}
 const state = {
   dir: null,
   parent: null,
@@ -205,14 +253,7 @@ function renderInfo(info, filePath) {
   $('panel-warnings').hidden = !info.warnings.length;
   $('warnings').replaceChildren(...info.warnings.map((w) => el('li', { textContent: w })));
 
-  const isPmx = info.kind === 'pmx';
-  $('panel-materials').hidden = !info.materialNames.length;
-  $('material-count').textContent = info.materialNames.length;
-  $('materials').replaceChildren(...info.materialNames.map((name, i) => {
-    const cb = el('input', { type: 'checkbox', checked: true, disabled: !isPmx });
-    cb.addEventListener('change', () => viewer.setMaterialVisible(i, cb.checked));
-    return el('li', {}, el('label', { title: name }, cb, el('span', { textContent: name })));
-  }));
+  materialPanel.load();
 
   $('panel-morphs').hidden = !info.morphList.length;
   $('morph-count').textContent = info.morphList.length;
@@ -300,7 +341,7 @@ window.addEventListener('keydown', (ev) => {
   // checkboxes / sliders keep focus after a click but are not text entry; ev.code works with a Korean IME too
   const el = document.activeElement;
   const typing = !!el && (/^(SELECT|TEXTAREA)$/.test(el.tagName) || (el.tagName === 'INPUT' && !/^(checkbox|range|button)$/.test(el.type)));
-  const plain = !typing && !ev.ctrlKey && !ev.altKey && !ev.metaKey && !$('convert-dialog').open;
+  const plain = !typing && !ev.ctrlKey && !ev.altKey && !ev.metaKey && !document.querySelector('dialog[open]');
   if (ev.ctrlKey && ev.code === 'KeyO') { ev.preventDefault(); $('btn-open').click(); }
   else if (ev.ctrlKey && ev.code === 'KeyE') { ev.preventDefault(); if (!$('btn-convert').disabled) $('btn-convert').click(); }
   else if (plain && ev.code === 'KeyF') viewer.frame();
