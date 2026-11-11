@@ -10,14 +10,26 @@
 
 ## 다음 버전 배포
 
-깨끗한 `main`에서 변경 사항을 커밋하고 다음 명령을 실행한다.
+최신 `main`에서 릴리스 브랜치를 만들고 버전을 올린다.
 
 ```sh
-npm version patch
-git push origin main --follow-tags
+git switch -c release/next
+npm version patch --no-git-tag-version
+git add package.json package-lock.json
+git commit -m "Bump release version"
+git push -u origin release/next
 ```
 
-`npm version minor` / `npm version major`도 사용할 수 있다. 태그는 반드시 `v` + `package.json`의 버전과 같아야 한다. `-beta.1` 같은 사전 버전 태그는 prerelease로 등록한다.
+PR을 생성하고 CI 통과 후 `main`에 병합한다. 로컬 `main`을 동기화한 뒤 병합 커밋에 버전 태그를 생성·푸시한다. 아래 `vX.Y.Z`는 실제 패키지 버전으로 바꾼다.
+
+```sh
+git switch main
+git pull --ff-only origin main
+git tag -a vX.Y.Z -m "MMD Canvas vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+버전 변경에는 `npm version minor --no-git-tag-version` / `npm version major --no-git-tag-version`도 사용할 수 있다. 태그는 반드시 `v` + `package.json`의 버전과 같아야 한다. `-beta.1` 같은 사전 버전 태그는 prerelease로 등록한다.
 
 실패하면 Actions에서 실패한 작업을 재실행한다. 게시 단계는 같은 태그의 기존 릴리스를 재사용한다. 이미 배포한 버전을 수정할 때는 새 버전을 사용한다.
 

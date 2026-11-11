@@ -1,5 +1,7 @@
 # MMD Canvas
 
+**한국어** · [简体中文](docs/README.zh-CN.md) · [English](docs/README.en.md) · [日本語](docs/README.ja.md)
+
 PMX(MMD) 모델을 미리 보고 **FBX / USD로 변환**하는 데스크톱 앱입니다. 폴더 탐색, 3D 뷰어, 단일·일괄 변환을 한 화면에서 제공합니다. 앱 내부와 CLI에서는 `MMD Converter`라는 이름도 사용합니다.
 
 ![MMD Canvas에서 PMX 모델과 소프트 그림자, 재질과 모프 정보를 표시한 실행 화면](docs/images/mmd-canvas-preview.png)
@@ -131,14 +133,13 @@ npm run dist                        # 현재 OS 배포 파일 생성
 - Actions의 **Release → Run workflow**에서 브랜치를 선택하면 릴리스를 게시하지 않고 빌드 결과를 받을 수 있습니다.
 - Dependabot이 npm 의존성과 GitHub Actions 업데이트를 매주 확인합니다.
 
-변경 사항을 커밋한 깨끗한 `main`에서 다음 버전을 배포합니다.
+릴리스 브랜치에서 버전을 올리고 `package.json`과 `package-lock.json`을 커밋해 PR로 병합합니다.
 
 ```bash
-npm version patch
-git push origin main --follow-tags
+npm version patch --no-git-tag-version
 ```
 
-자세한 절차와 서명 관련 설정은 [릴리스 가이드](docs/releases.md)를 참고하세요.
+CI 통과 후 병합된 최신 `main`에서 패키지 버전과 일치하는 `vX.Y.Z` 태그를 생성·푸시하면 릴리스가 시작됩니다. 자세한 절차와 서명 관련 설정은 [릴리스 가이드](docs/releases.md)를 참고하세요.
 
 ## 구현 구조
 
