@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' app:; img-src 'self' app: blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self' app: 'unsafe-inline'; connect-src 'self' app: blob: data:; worker-src 'self' blob:">
+  <title>MMD Converter</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "../node_modules/three/build/three.module.js",
+        "three/addons/": "../node_modules/three/examples/jsm/",
+        "three-mesh-bvh": "../node_modules/three-mesh-bvh/src/index.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <header id="toolbar">
+    <div class="brand">MMD Converter</div>
+    <button id="btn-open" title="파일 열기 (Ctrl+O)">파일 열기</button>
+    <div class="sep"></div>
+    <button id="btn-convert" class="primary" disabled title="현재 PMX를 FBX / USD로 변환 (Ctrl+E)">변환…</button>
+    <button id="btn-batch" title="현재 폴더의 PMX를 한꺼번에 변환">폴더 일괄 변환…</button>
+    <div class="spacer"></div>
+    <label class="slider" title="조명 세기 (더블클릭: 기본값)">조명
+      <input type="range" id="light-intensity" min="0" max="3" step="0.05" value="1">
+      <span id="light-value">100%</span>
+    </label>
+    <label class="toggle" title="레이트레이싱 소프트 섀도 (정지하면 점점 깨끗해집니다)"><input type="checkbox" id="flag-shadow">RT 그림자</label>
+    <label class="slider" title="그림자 부드러움 — 광원 크기 (더블클릭: 기본값)">부드러움
+      <input type="range" id="shadow-softness" min="0" max="100" step="1" value="25">
+    </label>
+    <div class="sep"></div>
+    <label class="toggle"><input type="checkbox" id="flag-grid" checked>그리드</label>
+    <label class="toggle"><input type="checkbox" id="flag-skeleton">본</label>
+    <label class="toggle"><input type="checkbox" id="flag-wireframe">와이어프레임</label>
+    <button id="btn-frame" title="모델에 맞춰 보기 (F)">맞춰 보기</button>
+  </header>
+
+  <main>
+    <aside id="browser">
+      <div class="pathbar">
+        <button id="btn-up" title="상위 폴더 (Backspace)">↑</button>
+        <input id="path-input" spellcheck="false" aria-label="폴더 경로">
+        <button id="btn-pick" title="폴더 선택">…</button>
+      </div>
+      <div class="drives" id="drives"></div>
+      <div class="filterbar">
+        <input id="filter-input" placeholder="이름 필터" spellcheck="false" aria-label="이름 필터">
+        <label class="toggle" title="3D 파일만 표시"><input type="checkbox" id="only-3d" checked>3D만</label>
+      </div>
+      <ul id="file-list" tabindex="0" aria-label="파일 목록"></ul>
+      <div class="browser-status" id="browser-status"></div>
+    </aside>
+
+    <section id="viewport">
+      <div id="canvas-host"></div>
+      <div id="empty-hint">
+        <div class="hint-title">3D 파일을 열어 보세요</div>
+        <div>왼쪽 목록에서 파일을 선택하거나, 창으로 끌어다 놓으세요.</div>
+        <div class="hint-sub">PMX · FBX · glTF/GLB · OBJ · STL · PLY · DAE · 3MF · USD</div>
+      </div>
+      <div id="loading" hidden>불러오는 중…</div>
+      <div id="viewport-error" hidden></div>
+    </section>
+
+    <aside id="inspector">
+      <section class="panel">
+        <h2>모델 정보</h2>
+        <div id="info" class="info-grid"><div class="muted">열린 모델이 없습니다.</div></div>
+      </section>
+      <section class="panel" id="panel-warnings" hidden>
+        <h2>참고</h2>
+        <ul id="warnings" class="warn-list"></ul>
+      </section>
+      <section class="panel" id="panel-materials" hidden>
+        <h2>재질 <span class="count" id="material-count"></span></h2>
+        <ul id="materials" class="check-list"></ul>
+      </section>
+      <section class="panel" id="panel-morphs" hidden>
+        <h2>모프 <span class="count" id="morph-count"></span><button id="btn-reset-morphs" class="link">초기화</button></h2>
+        <div id="morphs"></div>
+      </section>
+    </aside>
+  </main>
+
+  <footer id="statusbar"><span id="status-text">준비됨</span></footer>
+
+  <dialog id="convert-dialog">
+    <form method="dialog" id="convert-form">
+      <h2 id="convert-title">변환</h2>
+      <div class="field" id="field-source">
+        <label>원본</label>
+        <div id="convert-source" class="path-text"></div>
+      </div>
+      <div class="field">
+        <label for="opt-format">출력 형식</label>
+        <select id="opt-format">
+          <option value="fbx">FBX (binary 7.4) — Unity / Unreal / Blender / Maya</option>
+          <option value="usda">USD (.usda 텍스트) — Omniverse / Blender / Houdini</option>
+          <option value="usdz">USDZ (단일 패키지)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="opt-output" id="label-output">저장 위치</label>
+        <div class="row">
+          <input id="opt-output" spellcheck="false">
+          <button type="button" id="btn-output">찾아보기</button>
+        </div>
+      </div>
+      <div class="field two">
+        <div>
+          <label for="opt-scale">스케일</label>
+          <select id="opt-scale">
+            <option value="8">8 — 1 MMD 단위 = 8cm (권장)</option>
+            <option value="1">1 — 원본 수치 유지</option>
+            <option value="10">10</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+        <div>
+          <label for="opt-names">이름 (본 / 재질 / 모프)</label>
+          <select id="opt-names">
+            <option value="original">원본 (일본어)</option>
+            <option value="english">영어 우선 (표준 본 자동 번역)</option>
+          </select>
+        </div>
+      </div>
+      <div class="checks">
+        <label class="toggle"><input type="checkbox" id="opt-morphs" checked>모프를 블렌드셰이프로 내보내기</label>
+        <label class="toggle" id="row-copy"><input type="checkbox" id="opt-copy" checked>텍스처를 출력 폴더로 복사</label>
+        <label class="toggle" id="row-ascii"><input type="checkbox" id="opt-ascii">USD prim 이름을 ASCII로 강제</label>
+        <label class="toggle" id="row-recursive" hidden><input type="checkbox" id="opt-recursive">하위 폴더 포함</label>
+      </div>
+      <div id="convert-result" hidden></div>
+      <div class="actions">
+        <button type="button" id="btn-reveal" hidden>폴더에서 보기</button>
+        <div class="spacer"></div>
+        <button type="button" id="btn-cancel">닫기</button>
+        <button type="button" id="btn-run" class="primary">변환</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

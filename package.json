@@ -1,0 +1,21 @@
+{
+  "name": "mmd-converter",
+  "version": "0.1.0",
+  "description": "PMX(MMD) -> FBX / USD converter with 3D file viewer & browser",
+  "type": "module",
+  "main": "electron/main.js",
+  "bin": {
+    "mmdconv": "cli.js"
+  },
+  "scripts": {
+    "start": "electron .",
+    "convert": "node cli.js",
+    "test": "node tests/run-tests.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "electron": "^45.3.0",
+    "three": "^0.187.0",
+    "three-mesh-bvh": "^0.9.18"
+  }
+}
