@@ -56,7 +56,7 @@ Use the **Lambert / Toon** sphere buttons at the top right of the viewport.
 
 Toon cast shadows share the unlit face's dark tone instead of darkening it again. No automatic hemisphere fill is applied. Soft PCSS shadow edges interpolate between the two tones; source texture, emission, and AO variations remain visible.
 
-![Simple Toon mode, light gizmo, and outline controls](images/mmd-canvas-toon-preview.png)
+![Simple Toon rendering with lux lighting, EV100 exposure, outlines, and workspace controls](images/mmd-canvas-toon-preview.png)
 
 Selecting Toon reveals outline controls below the buttons:
 

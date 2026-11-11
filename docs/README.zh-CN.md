@@ -59,7 +59,7 @@ v0.3.0 新增工作区保存与恢复及四语言界面。Toon 改为两档明�
 
 Toon 的投射阴影与背光面使用相同暗色调，不会重复压暗；不再应用自动半球补光。PCSS 柔和边缘在两档明暗之间插值，保留原材质的纹理、自发光和 AO 变化。
 
-![简易 Toon 渲染、光源操纵器及描边设置](images/mmd-canvas-toon-preview.png)
+![简易 Toon 渲染、lux 光照、EV100 曝光、描边和工作区设置](images/mmd-canvas-toon-preview.png)
 
 选择 Toon 后，按钮下方会出现描边设置：
 
