@@ -1,3 +1,4 @@
+import { t } from '../src/i18n/index.js';
 // three.js viewer: loads PMX (own parser) and common 3D formats (three.js loaders).
 
 import * as THREE from 'three';
@@ -11,6 +12,7 @@ import { buildScene } from '../src/core/scene.js';
 import { SoftShadows } from './shadows.js';
 import { collectMaterials } from './material-info.js';
 import { ViewportShading } from './viewport-shading.js';
+import { LinearViewportPipeline } from './color-pipeline.js';
 
 export const VIEWABLE = ['.pmx', '.fbx', '.glb', '.gltf', '.obj', '.stl', '.ply', '.dae', '.3mf', '.usdz', '.usda', '.usd', '.usdc'];
 
@@ -24,9 +26,9 @@ const extname = (p) => { const m = /\.[^.\\/]+$/.exec(p); return m ? m[0].toLowe
 export class Viewer {
   constructor(container) {
     this.container = container;
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    this.renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.colorPipeline = new LinearViewportPipeline(this.renderer);
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
@@ -92,7 +94,7 @@ export class Viewer {
       if (!changed) return;
       this.current?.shading?.updateOutlines();
       if (this.shadow.enabled && this.current && this.shadow.dirty) this.updateShadowMap();
-      this.renderer.render(this.scene, this.camera);
+      this.colorPipeline.render(this.scene, this.camera);
     };
     tick();
   }
@@ -106,6 +108,7 @@ export class Viewer {
       this.current.shading.apply(mode);
       this.shadows.patch(this.current.object);
     }
+    this.setLightIntensity(this.lightLevel);
     this.invalidateShadows();
     this.onMaterialsChanged?.();
   }
@@ -127,7 +130,8 @@ export class Viewer {
   setLightIntensity(k) {
     this.lightLevel = k;
     // with shadows on, the sun carries more of the light so the shadows actually read
-    const traced = this.shadow.enabled;
+    // Toon uses one stable palette; toggling cast shadows must not change both tones.
+    const traced = this.renderMode === 'toon' || this.shadow.enabled;
     this.hemi.intensity = (traced ? 1.3 : 2.2) * k;
     this.sun.intensity = (traced ? 1.8 : 0.9) * k;
     this.scene.environmentIntensity = 0.6 * k;
@@ -180,7 +184,7 @@ export class Viewer {
     const run = () => {
       this.current?.shading?.updateOutlines();
       if (this.shadow.enabled && this.current) this.updateShadowMap();
-      this.renderer.render(this.scene, this.camera);
+      this.colorPipeline.render(this.scene, this.camera);
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
     };
     run(); run();
@@ -220,6 +224,7 @@ export class Viewer {
   resize() {
     const w = this.container.clientWidth || 1, h = this.container.clientHeight || 1;
     this.renderer.setSize(w, h);
+    this.colorPipeline.resize();
     this.current?.shading?.viewport.set(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
@@ -261,7 +266,7 @@ export class Viewer {
   // ---------- PMX ----------
   async loadPmx(filePath) {
     const res = await fetch(fileUrl(filePath));
-    if (!res.ok) throw new Error(`파일을 읽을 수 없습니다: ${filePath}`);
+    if (!res.ok) throw new Error(t`파일을 읽을 수 없습니다: ${filePath}`);
     const pmx = parsePmx(await res.arrayBuffer());
     const data = buildScene(pmx, { scale: 1 });
     const baseDir = dirname(filePath);
@@ -355,6 +360,19 @@ export class Viewer {
     const c = this.current;
     if (!c || c.kind !== 'pmx') return;
     c.morphWeights[index] = weight;
+    this.applyMorphs();
+  }
+
+  setMorphWeights(weights) {
+    const c = this.current;
+    if (!c || c.kind !== 'pmx' || weights.length !== c.morphWeights.length) return;
+    c.morphWeights.set(weights);
+    this.applyMorphs();
+  }
+
+  applyMorphs() {
+    const c = this.current;
+    if (!c || c.kind !== 'pmx') return;
     const pos = c.object.geometry.attributes.position;
     pos.array.set(c.basePositions);
     c.data.morphs.forEach((m, mi) => {
@@ -449,14 +467,14 @@ export class Viewer {
         break;
       }
       default:
-        throw new Error(`지원하지 않는 형식입니다: ${ext}`);
+        throw new Error(t`지원하지 않는 형식입니다: ${ext}`);
     }
-    if (!object) throw new Error('모델을 불러오지 못했습니다.');
+    if (!object) throw new Error(t('모델을 불러오지 못했습니다.'));
     let bones = 0;
     const materialNames = new Set();
     object.traverse((o) => {
       if (o.isBone) bones++;
-      if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => materialNames.add(m.name || '(이름 없음)'));
+      if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => materialNames.add(m.name || t('(이름 없음)')));
     });
     return {
       kind: 'generic',

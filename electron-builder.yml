@@ -4,6 +4,11 @@ directories:
   output: dist
 artifactName: MMD-Canvas-${version}-${os}-${arch}.${ext}
 asar: true
+fileAssociations:
+  - ext: canvas
+    name: MMD Canvas Workspace
+    description: MMD Canvas conversion workspace
+    role: Editor
 npmRebuild: false
 files:
   - electron/**/*
@@ -12,6 +17,7 @@ files:
   - cli.js
   - package.json
   - LICENSE
+  - licenses/**/*
 win:
   target: nsis
 nsis:

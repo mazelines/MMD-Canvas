@@ -47,7 +47,7 @@ export function writeUsda(scene, textureMap = new Map(), options = {}) {
 
   L.push('#usda 1.0', '(');
   L.push(`    defaultPrim = ${str(root)}`);
-  L.push(`    doc = "Converted from PMX by MMD Converter"`);
+  L.push(`    doc = "Converted from PMX by MMD Canvas"`);
   L.push(`    metersPerUnit = ${metersPerUnit}`);
   L.push('    upAxis = "Y"', ')', '');
 

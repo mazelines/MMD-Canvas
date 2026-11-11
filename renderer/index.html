@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' app:; img-src 'self' app: blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self' app: 'unsafe-inline'; connect-src 'self' app: blob: data:; worker-src 'self' blob:">
-  <title>MMD Converter</title>
+  <title>MMD Canvas</title>
   <link rel="stylesheet" href="style.css">
   <script type="importmap">
     {
@@ -16,7 +16,7 @@
 </head>
 <body>
   <header id="toolbar">
-    <div class="brand">MMD Converter</div>
+    <div class="brand">MMD Canvas</div>
     <button id="btn-open" title="파일 열기 (Ctrl+O)">파일 열기</button>
     <div class="sep"></div>
     <button id="btn-convert" class="primary" disabled title="현재 PMX를 FBX / USD로 변환 (Ctrl+E)">변환…</button>
@@ -39,6 +39,15 @@
     <label class="toggle"><input type="checkbox" id="flag-wireframe">와이어프레임</label>
     <button id="btn-frame" title="모델에 맞춰 보기 (F)">맞춰 보기</button>
   </header>
+
+  <div id="workspacebar">
+    <span class="workspace-label">워크스페이스</span>
+    <span id="workspace-name" title="폴더·모델·뷰포트·변환 설정을 .canvas 파일로 저장합니다.">저장되지 않은 작업</span>
+    <div class="spacer"></div>
+    <button id="workspace-open" title="워크스페이스 열기 (Ctrl+Shift+O)">열기…</button>
+    <button id="workspace-save" title="워크스페이스 저장 (Ctrl+S)">저장</button>
+    <button id="workspace-save-as" title="다른 이름으로 저장 (Ctrl+Shift+S)">다른 이름으로…</button>
+  </div>
 
   <main>
     <aside id="browser">

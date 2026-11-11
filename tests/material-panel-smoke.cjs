@@ -1,18 +1,36 @@
 // Run after npm test: npx electron tests/material-panel-smoke.cjs
 // Uses the real renderer, textures and WebGL; leaves screenshots under tests/out.
 const { app } = require('electron');
+
+// The test window is often covered by other windows. Chromium then throttles its timers and stops
+// producing frames, which makes waits time out and screenshots fail at random.
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 const path = require('node:path');
 const fs = require('node:fs/promises');
+const syncFs = require('node:fs');
 const os = require('node:os');
 
 (async () => {
-  const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'mmd-material-test-'));
+  const profile = syncFs.mkdtempSync(path.join(os.tmpdir(), 'mmd-material-test-'));
   app.setPath('userData', profile);
   process.env.MMDCONV_OPEN = path.resolve('tests/sample/complex.pmx');
+  process.env.MMDCONV_LOCALE = 'ko-KR';
   delete process.env.MMDCONV_SHOT;
   const errors = [];
   const timeout = setTimeout(() => { console.error('Material UI test timed out'); app.exit(1); }, 45000);
   app.on('browser-window-created', (_event, win) => {
+    const capture = async () => {
+      for (let attempt = 0; ; attempt++) {
+        try { return await win.webContents.capturePage(); }
+        catch (error) {
+          if (attempt >= 19 || !error.message.includes('display surface')) throw error;
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+    };
     win.webContents.on('console-message', (event) => { if (event.level === 'error' || event.level === 3) errors.push(event.message); });
     win.webContents.once('did-finish-load', async () => {
       try {
@@ -47,7 +65,7 @@ const os = require('node:os');
           check(!$('texture-dialog').open, 'texture dialog closes');
           return { materials: rows().length, textures: $('material-detail').querySelectorAll('.texture-card').length };
         })()`);
-        await fs.writeFile(path.resolve('tests/out/material-panel-pmx.png'), (await win.webContents.capturePage()).toPNG());
+        await fs.writeFile(path.resolve('tests/out/material-panel-pmx.png'), (await capture()).toPNG());
         const shading = await win.webContents.executeJavaScript(`(async () => {
           const $ = (id) => document.getElementById(id);
           const check = (condition, message) => { if (!condition) throw new Error(message); };
@@ -84,7 +102,7 @@ const os = require('node:os');
           check(JSON.parse(localStorage.getItem('viewportOutline')).width === 1.6, 'outline preferences saved');
           return { mode: __viewer.renderMode, width: __viewer.outlineSettings.width };
         })()`);
-        await fs.writeFile(path.resolve('tests/out/viewport-toon.png'), (await win.webContents.capturePage()).toPNG());
+        await fs.writeFile(path.resolve('tests/out/viewport-toon.png'), (await capture()).toPNG());
         const genericPath = path.resolve('tests/out/basic.fbx');
         await win.webContents.executeJavaScript(`(async () => {
           const input = document.getElementById('path-input');
@@ -102,7 +120,7 @@ const os = require('node:os');
           document.getElementById('material-show-all').click();
           if (document.getElementById('material-detail').textContent.includes('PMX 원본 정보')) throw new Error('stale PMX details');
         })()`);
-        await fs.writeFile(path.resolve('tests/out/material-panel-fbx.png'), (await win.webContents.capturePage()).toPNG());
+        await fs.writeFile(path.resolve('tests/out/material-panel-fbx.png'), (await capture()).toPNG());
         win.setSize(960, 720);
         await new Promise((resolve) => setTimeout(resolve, 200));
         await win.webContents.executeJavaScript(`(() => {
@@ -114,7 +132,7 @@ const os = require('node:os');
           if (document.getElementById('inspector-overview').hidden) throw new Error('Keyboard tab navigation');
           tab.click();
         })()`);
-        await fs.writeFile(path.resolve('tests/out/material-panel-narrow.png'), (await win.webContents.capturePage()).toPNG());
+        await fs.writeFile(path.resolve('tests/out/material-panel-narrow.png'), (await capture()).toPNG());
         await win.webContents.executeJavaScript(`(async () => {
           const THREE = await import('three');
           const { ViewportShading } = await import('./viewport-shading.js');
@@ -167,17 +185,36 @@ const os = require('node:os');
             __viewer.setOutline(2.5, '#151923');
             return __viewer.benchmark(10);
           })()`);
-          await fs.writeFile(path.resolve('tests/out/viewport-toon-heavy.png'), (await win.webContents.capturePage()).toPNG());
+          await fs.writeFile(path.resolve('tests/out/viewport-toon-heavy.png'), (await capture()).toPNG());
           console.log('Heavy Toon benchmark:', JSON.stringify(benchmark));
         }
+        if (errors.length) throw new Error(errors.join('\n'));
+        const probe = await win.webContents.executeJavaScript(`(async () => {
+          const { probeToonRendering } = await import('../tests/toon-render-probe.js');
+          const result = probeToonRendering();
+          __viewer.setRenderMode('toon');
+          __viewer.setShadows(false);
+          const intensities = [__viewer.hemi.intensity, __viewer.sun.intensity];
+          __viewer.setShadows(true);
+          if (intensities[0] !== __viewer.hemi.intensity || intensities[1] !== __viewer.sun.intensity) throw new Error('Shadow toggle changes Toon palette');
+          return result;
+        })()`);
+        await fs.writeFile(path.resolve('tests/out/toon-shadow-probe.png'), Buffer.from(probe.screenshot.split(',')[1], 'base64'));
+        console.log('Two-tone GPU probe:', JSON.stringify({ tones: probe.tones, lit: probe.lit, unlit: probe.unlit }));
+        const colors = await win.webContents.executeJavaScript(`(async () => {
+          const { probeColorPipeline } = await import('../tests/color-pipeline-probe.js');
+          return probeColorPipeline();
+        })()`);
+        console.log('Linear/GT7 GPU probe:', JSON.stringify(colors));
         if (errors.length) throw new Error(errors.join('\n'));
         console.log('Material and shading UI smoke passed:', JSON.stringify({ ...result, ...shading }), '(PMX + FBX)');
         clearTimeout(timeout);
         app.exit(0);
       } catch (error) {
         console.error(error, errors);
-        await fs.writeFile(path.resolve('tests/out/material-panel-failure.png'), (await win.webContents.capturePage()).toPNG());
-        clearTimeout(timeout); app.exit(1);
+        try { await fs.writeFile(path.resolve('tests/out/material-panel-failure.png'), (await capture()).toPNG()); }
+        catch (captureError) { console.error('Failure screenshot unavailable:', captureError.message); }
+        finally { clearTimeout(timeout); app.exit(1); }
       }
     });
   });

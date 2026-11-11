@@ -1,7 +1,13 @@
+import { t, setLanguage, getLanguage, formatNumber, translateStatic } from '../src/i18n/index.js';
 import { Viewer, VIEWABLE } from './viewer.js';
 import { MaterialPanel } from './material-panel.js';
+import { captureWorkspace, restoreWorkspaceState } from './workspace-state.js';
 
 const api = window.api;
+const startup = await api.startup();
+setLanguage(startup.locale);
+translateStatic(document.body);
+document.getElementById('viewport').dataset.dropLabel = t('여기에 놓아 열기');
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...children) => {
   const n = Object.assign(document.createElement(tag), props);
@@ -69,14 +75,21 @@ const state = {
   dialogMode: 'single',
   lastOutput: null,
   busy: false,
+  workspacePath: null,
+  workspaceBusy: false,
+  restoring: false,
+  modelLoading: false,
+  modelLoadId: 0,
+  conversionSource: null,
 };
+const OPENABLE = [...VIEWABLE, '.canvas'];
 
 const basename = (p) => p.replace(/^.*[\\/]/, '');
 const dirname = (p) => p.replace(/[\\/][^\\/]*$/, '') || p;
 const stripExt = (p) => p.replace(/\.[^.\\/]+$/, '');
 const joinPath = (dir, name) => (/[\\/]$/.test(dir) ? dir + name : `${dir}\\${name}`);
 const fmtSize = (n) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
-const fmtNum = (n) => Number(n).toLocaleString('ko-KR');
+const fmtNum = formatNumber;
 
 function setStatus(text, kind = '') {
   $('status-text').textContent = text;
@@ -95,7 +108,7 @@ async function navigate(dir, selectName = null) {
     localStorage.setItem('lastDir', r.dir);
     renderList(selectName);
   } catch (e) {
-    setStatus(`폴더를 열 수 없습니다: ${e.message}`, 'error');
+    setStatus(t`폴더를 열 수 없습니다: ${e.message}`, 'error');
     $('path-input').value = state.dir || '';
   }
 }
@@ -103,15 +116,15 @@ async function navigate(dir, selectName = null) {
 function renderList(selectName = null) {
   const filter = $('filter-input').value.trim().toLowerCase();
   const only3d = $('only-3d').checked;
-  const collator = new Intl.Collator('ko', { numeric: true, sensitivity: 'base' });
+  const collator = new Intl.Collator(getLanguage(), { numeric: true, sensitivity: 'base' });
   const dirs = state.entries.filter((e) => e.isDir && !e.name.startsWith('$')).sort((a, b) => collator.compare(a.name, b.name));
-  const files = state.entries.filter((e) => !e.isDir && (!only3d || VIEWABLE.includes(e.ext))).sort((a, b) => collator.compare(a.name, b.name));
+  const files = state.entries.filter((e) => !e.isDir && (!only3d || OPENABLE.includes(e.ext))).sort((a, b) => collator.compare(a.name, b.name));
   state.visible = [...dirs, ...files].filter((e) => !filter || e.name.toLowerCase().includes(filter));
 
   const list = $('file-list');
   list.replaceChildren();
   state.visible.forEach((e, i) => {
-    const viewable = VIEWABLE.includes(e.ext);
+    const viewable = OPENABLE.includes(e.ext);
     const li = el('li', { className: e.isDir ? 'dir' : `${e.ext.slice(1)}${viewable ? '' : ' dim'}`, title: e.path });
     li.dataset.index = i;
     li.append(
@@ -124,7 +137,7 @@ function renderList(selectName = null) {
   });
   const modelCount = files.filter((f) => VIEWABLE.includes(f.ext)).length;
   const pmxCount = files.filter((f) => f.ext === '.pmx').length;
-  $('browser-status').textContent = `폴더 ${dirs.length} · 3D 파일 ${modelCount}${pmxCount ? ` (PMX ${pmxCount})` : ''}`;
+  $('browser-status').textContent = t`폴더 ${dirs.length} · 3D 파일 ${modelCount}${pmxCount ? ` (PMX ${pmxCount})` : ''}`;
   let sel = -1;
   if (selectName) sel = state.visible.findIndex((e) => e.name === selectName);
   if (sel < 0) sel = state.visible.findIndex((e) => e.path === state.loadedPath);
@@ -146,6 +159,7 @@ function activate(index) {
   const e = state.visible[index];
   if (!e) return;
   if (e.isDir) navigate(e.path);
+  else if (e.ext === '.canvas') openWorkspace(e.path);
   else if (VIEWABLE.includes(e.ext)) openModel(e.path);
 }
 
@@ -190,22 +204,26 @@ $('filter-input').addEventListener('input', () => renderList());
 $('only-3d').addEventListener('change', () => renderList());
 
 async function openPath(p) {
-  if (!p) return;
+  if (!p || state.workspaceBusy || state.busy) return;
+  if (/\.canvas$/i.test(p)) { await openWorkspace(p); return; }
   try {
     const st = await api.stat(p);
     if (st.isDir) await navigate(p);
     else { await navigate(dirname(p), basename(p)); await openModel(p); }
   } catch (e) {
-    setStatus(`경로를 열 수 없습니다: ${p}`, 'error');
+    setStatus(t`경로를 열 수 없습니다: ${p}`, 'error');
   }
 }
 
 // ---------------- model loading ----------------
-async function openModel(filePath) {
+async function openModel(filePath, fromWorkspace = false) {
+  if ((state.workspaceBusy && !fromWorkspace) || state.busy) return null;
+  const loadId = ++state.modelLoadId;
+  state.modelLoading = true; updateWorkspaceBar();
   $('empty-hint').hidden = true;
   $('viewport-error').hidden = true;
   $('loading').hidden = false;
-  setStatus(`불러오는 중: ${filePath}`);
+  setStatus(t`불러오는 중: ${filePath}`);
   const started = performance.now();
   try {
     const info = await viewer.load(filePath);
@@ -217,33 +235,35 @@ async function openModel(filePath) {
     document.querySelectorAll('#file-list li.loaded').forEach((li) => li.classList.remove('loaded'));
     const idx = state.visible.findIndex((e) => e.path === filePath);
     if (idx >= 0) $('file-list').children[idx].classList.add('loaded');
-    document.title = `${basename(filePath)} — MMD Converter`;
-    setStatus(`${filePath}  ·  정점 ${fmtNum(info.vertices)} · 삼각형 ${fmtNum(info.triangles)}  ·  ${Math.round(performance.now() - started)} ms`);
+    document.title = `${basename(filePath)} — MMD Canvas`;
+    setStatus(t`${filePath}  ·  정점 ${fmtNum(info.vertices)} · 삼각형 ${fmtNum(info.triangles)}  ·  ${Math.round(performance.now() - started)} ms`);
     api.notifyLoaded({ file: filePath, vertices: info.vertices, triangles: info.triangles, kind: info.kind });
+    return info;
   } catch (e) {
     console.error(e);
     if (state.loadedPath === null) $('empty-hint').hidden = false;
-    $('viewport-error').textContent = `${basename(filePath)} 을(를) 열 수 없습니다 — ${e.message}`;
+    $('viewport-error').textContent = t`${basename(filePath)} 을(를) 열 수 없습니다 — ${e.message}`;
     $('viewport-error').hidden = false;
-    setStatus(`불러오기 실패: ${e.message}`, 'error');
+    setStatus(t`불러오기 실패: ${e.message}`, 'error');
     api.notifyLoaded({ file: filePath, error: e.message });
+    return null;
   } finally {
-    $('loading').hidden = true;
+    if (loadId === state.modelLoadId) { $('loading').hidden = true; state.modelLoading = false; updateWorkspaceBar(); }
   }
 }
 
 function renderInfo(info, filePath) {
   const rows = [
-    ['이름', info.name || basename(filePath)],
-    info.nameEn ? ['영문 이름', info.nameEn] : null,
-    ['형식', info.format],
-    ['정점', fmtNum(info.vertices)],
-    ['삼각형', fmtNum(info.triangles)],
-    ['재질', fmtNum(info.materialNames.length)],
-    ['본', fmtNum(info.bones)],
-    info.kind === 'pmx' ? ['모프', fmtNum(info.morphs)] : ['메시', fmtNum(info.meshes)],
-    info.kind === 'pmx' ? ['텍스처', fmtNum(info.textures)] : null,
-    info.kind === 'pmx' ? ['물리', `강체 ${fmtNum(info.rigidBodies)} · 조인트 ${fmtNum(info.joints)}`] : null,
+    [t('이름'), info.name || basename(filePath)],
+    info.nameEn ? [t('영문 이름'), info.nameEn] : null,
+    [t('형식'), info.format],
+    [t('정점'), fmtNum(info.vertices)],
+    [t('삼각형'), fmtNum(info.triangles)],
+    [t('재질'), fmtNum(info.materialNames.length)],
+    [t('본'), fmtNum(info.bones)],
+    info.kind === 'pmx' ? [t('모프'), fmtNum(info.morphs)] : [t('메시'), fmtNum(info.meshes)],
+    info.kind === 'pmx' ? [t('텍스처'), fmtNum(info.textures)] : null,
+    info.kind === 'pmx' ? [t('물리'), t`강체 ${fmtNum(info.rigidBodies)} · 조인트 ${fmtNum(info.joints)}`] : null,
   ].filter(Boolean);
   const grid = $('info');
   grid.replaceChildren();
@@ -288,7 +308,7 @@ for (const flag of ['grid', 'skeleton', 'wireframe']) {
     const k = Number(slider.value);
     viewer.setLightIntensity(k);
     $('light-value').textContent = `${Math.round(k * 100)}%`;
-    if (save) localStorage.setItem('lightIntensity', String(k));
+    if (save && !state.restoring) localStorage.setItem('lightIntensity', String(k));
   };
   const saved = Number(localStorage.getItem('lightIntensity'));
   if (localStorage.getItem('lightIntensity') !== null && Number.isFinite(saved)) slider.value = String(saved);
@@ -303,7 +323,7 @@ for (const flag of ['grid', 'skeleton', 'wireframe']) {
     viewer.setShadowSoftness((Number(soft.value) / 100) * 0.12);
     viewer.setShadows(toggle.checked);
     soft.disabled = !toggle.checked;
-    if (save) localStorage.setItem('shadow', JSON.stringify({ on: toggle.checked, softness: Number(soft.value) }));
+    if (save && !state.restoring) localStorage.setItem('shadow', JSON.stringify({ on: toggle.checked, softness: Number(soft.value) }));
   };
   try {
     const p = JSON.parse(localStorage.getItem('shadow') || '{}');
@@ -342,7 +362,9 @@ window.addEventListener('keydown', (ev) => {
   const el = document.activeElement;
   const typing = !!el && (/^(SELECT|TEXTAREA)$/.test(el.tagName) || (el.tagName === 'INPUT' && !/^(checkbox|range|button)$/.test(el.type)));
   const plain = !typing && !ev.ctrlKey && !ev.altKey && !ev.metaKey && !document.querySelector('dialog[open]');
-  if (ev.ctrlKey && ev.code === 'KeyO') { ev.preventDefault(); $('btn-open').click(); }
+  if ((ev.ctrlKey || ev.metaKey) && ev.code === 'KeyS') { ev.preventDefault(); saveWorkspace(ev.shiftKey); }
+  else if ((ev.ctrlKey || ev.metaKey) && ev.shiftKey && ev.code === 'KeyO') { ev.preventDefault(); openWorkspace(); }
+  else if (ev.ctrlKey && ev.code === 'KeyO') { ev.preventDefault(); $('btn-open').click(); }
   else if (ev.ctrlKey && ev.code === 'KeyE') { ev.preventDefault(); if (!$('btn-convert').disabled) $('btn-convert').click(); }
   else if (plain && ev.code === 'KeyF') viewer.frame();
   else if (plain && ev.code === 'KeyW' && $('flag-light-gizmo').checked) viewer.setLightGizmoMode('translate');
@@ -399,23 +421,24 @@ function syncDialog() {
 }
 
 function openDialog(mode) {
+  if (state.workspaceBusy || state.modelLoading) return;
+  const source = mode === 'single' ? state.loadedPath : state.dir;
+  if (mode !== state.dialogMode || source !== state.conversionSource) $('opt-output').value = '';
+  state.conversionSource = source;
   state.dialogMode = mode;
   state.lastOutput = null;
-  loadDialogPrefs();
   $('convert-result').hidden = true;
   $('btn-reveal').hidden = true;
   $('btn-run').disabled = false;
   $('row-recursive').hidden = mode !== 'batch';
   if (mode === 'single') {
-    $('convert-title').textContent = 'PMX 변환';
+    $('convert-title').textContent = t('PMX 변환');
     $('convert-source').textContent = state.loadedPath;
-    $('label-output').textContent = '저장 위치';
-    $('opt-output').value = '';
+    $('label-output').textContent = t('저장 위치');
   } else {
-    $('convert-title').textContent = '폴더 일괄 변환';
-    $('convert-source').textContent = `${state.dir} 의 모든 PMX`;
-    $('label-output').textContent = '출력 폴더 (비워 두면 각 PMX와 같은 폴더)';
-    $('opt-output').value = '';
+    $('convert-title').textContent = t('폴더 일괄 변환');
+    $('convert-source').textContent = t`${state.dir} 의 모든 PMX`;
+    $('label-output').textContent = t('출력 폴더 (비워 두면 각 PMX와 같은 폴더)');
   }
   syncDialog();
   dialog.showModal();
@@ -441,7 +464,7 @@ function resultLines(r) {
   const s = r.stats;
   const lines = [
     el('div', { className: 'ok', textContent: `✔ ${r.output} (${fmtSize(r.size)})` }),
-    el('div', { textContent: `정점 ${fmtNum(s.vertices)} · 삼각형 ${fmtNum(s.triangles)} · 재질 ${s.materials} · 본 ${s.bones} · 모프 ${s.morphs} · 텍스처 ${s.textures}${s.missingTextures ? ` (누락 ${s.missingTextures})` : ''}` }),
+    el('div', { textContent: t`정점 ${fmtNum(s.vertices)} · 삼각형 ${fmtNum(s.triangles)} · 재질 ${s.materials} · 본 ${s.bones} · 모프 ${s.morphs} · 텍스처 ${s.textures}${s.missingTextures ? t` (누락 ${s.missingTextures})` : ''}` }),
   ];
   for (const w of r.warnings) lines.push(el('div', { className: 'warn', textContent: `⚠ ${w}` }));
   return lines;
@@ -450,7 +473,7 @@ function resultLines(r) {
 api.onConvertProgress((p) => {
   const box = $('convert-result');
   box.hidden = false;
-  box.replaceChildren(el('div', { textContent: `변환 중 ${p.index + 1} / ${p.total} — ${basename(p.file)}` }));
+  box.replaceChildren(el('div', { textContent: t`변환 중 ${p.index + 1} / ${p.total} — ${basename(p.file)}` }));
 });
 
 $('btn-run').addEventListener('click', async () => {
@@ -458,50 +481,110 @@ $('btn-run').addEventListener('click', async () => {
   const format = $('opt-format').value;
   const box = $('convert-result');
   const output = $('opt-output').value.trim();
-  if (state.dialogMode === 'single' && !output) { box.hidden = false; box.replaceChildren(el('div', { className: 'err', textContent: '저장 위치를 입력하세요.' })); return; }
+  if (state.dialogMode === 'single' && !output) { box.hidden = false; box.replaceChildren(el('div', { className: 'err', textContent: t('저장 위치를 입력하세요.') })); return; }
   saveDialogPrefs();
   state.busy = true;
+  updateWorkspaceBar();
   $('btn-run').disabled = true;
   $('btn-cancel').disabled = true;
   box.hidden = false;
-  box.replaceChildren(el('div', { textContent: '변환 중…' }));
+  box.replaceChildren(el('div', { textContent: t('변환 중…') }));
   try {
     if (state.dialogMode === 'single') {
       const r = await api.convertFile(state.loadedPath, output, { ...options(), format });
       box.replaceChildren(...resultLines(r));
       state.lastOutput = r.output;
-      setStatus(`변환 완료: ${r.output}`, 'ok');
+      setStatus(t`변환 완료: ${r.output}`, 'ok');
     } else {
       const results = await api.convertBatch(state.dir, output || null, format, $('opt-recursive').checked, options());
       const ok = results.filter((r) => r.ok);
-      const lines = [el('div', { className: results.length && ok.length === results.length ? 'ok' : 'warn', textContent: results.length ? `${ok.length} / ${results.length}개 변환 완료` : '이 폴더에는 PMX 파일이 없습니다.' })];
+      const lines = [el('div', { className: results.length && ok.length === results.length ? 'ok' : 'warn', textContent: results.length ? t`${ok.length} / ${results.length}개 변환 완료` : t('이 폴더에는 PMX 파일이 없습니다.') })];
       for (const r of results) {
         if (r.ok) {
-          lines.push(el('div', { textContent: `✔ ${basename(r.output)} (${fmtSize(r.size)})${r.stats.missingTextures ? ` — 텍스처 누락 ${r.stats.missingTextures}` : ''}` }));
+          lines.push(el('div', { textContent: `✔ ${basename(r.output)} (${fmtSize(r.size)})${r.stats.missingTextures ? t` — 텍스처 누락 ${r.stats.missingTextures}` : ''}` }));
         } else {
           lines.push(el('div', { className: 'err', textContent: `✘ ${basename(r.input)} — ${r.error}` }));
         }
       }
       box.replaceChildren(...lines);
       state.lastOutput = ok.length ? ok[0].output : null;
-      setStatus(`일괄 변환: ${ok.length} / ${results.length}개 완료`, ok.length === results.length ? 'ok' : 'error');
+      setStatus(t`일괄 변환: ${ok.length} / ${results.length}개 완료`, ok.length === results.length ? 'ok' : 'error');
     }
     $('btn-reveal').hidden = !state.lastOutput;
     if (state.dir) navigate(state.dir); // show new files in the browser
   } catch (e) {
-    box.replaceChildren(el('div', { className: 'err', textContent: `✘ 변환 실패 — ${e.message}` }));
-    setStatus(`변환 실패: ${e.message}`, 'error');
+    box.replaceChildren(el('div', { className: 'err', textContent: t`✘ 변환 실패 — ${e.message}` }));
+    setStatus(t`변환 실패: ${e.message}`, 'error');
   } finally {
     state.busy = false;
+    updateWorkspaceBar();
     $('btn-run').disabled = false;
     $('btn-cancel').disabled = false;
   }
 });
 
+// ---------------- workspace ----------------
+function updateWorkspaceBar() {
+  const unavailable = state.workspaceBusy || state.modelLoading || state.busy;
+  for (const id of ['workspace-open', 'workspace-save', 'workspace-save-as']) $(id).disabled = unavailable;
+  $('workspace-name').textContent = state.workspacePath ? basename(state.workspacePath) : t('저장되지 않은 작업');
+  $('workspace-name').title = state.workspacePath || t('폴더·모델·뷰포트·변환 설정을 .canvas 파일로 저장합니다.');
+}
+
+async function saveWorkspace(saveAs = false) {
+  if (state.workspaceBusy || state.modelLoading || state.busy) return;
+  state.workspaceBusy = true; updateWorkspaceBar();
+  try {
+    const result = await api.saveWorkspace(captureWorkspace(viewer, state, materialPanel), state.workspacePath, saveAs);
+    if (!result) return;
+    state.workspacePath = result.filePath;
+    setStatus(t`워크스페이스 저장 완료: ${result.filePath}`, 'ok');
+    if (state.dir) await navigate(state.dir, basename(result.filePath));
+  } catch (error) { setStatus(t`워크스페이스 저장 실패: ${error.message}`, 'error'); }
+  finally { state.workspaceBusy = false; updateWorkspaceBar(); }
+}
+
+async function openWorkspace(filePath = null) {
+  if (state.workspaceBusy || state.modelLoading || state.busy) return;
+  state.workspaceBusy = true; updateWorkspaceBar();
+  try {
+    const result = await api.openWorkspace(filePath);
+    if (!result) return;
+    const { data } = result;
+    if (data.model && !await openModel(data.model.path, true)) return;
+    if (!data.model) {
+      viewer.clear(); state.loadedPath = null; state.loadedInfo = null;
+      $('info').replaceChildren(el('div', { className: 'muted', textContent: t('열린 모델이 없습니다.') }));
+      $('panel-warnings').hidden = true; $('panel-morphs').hidden = true;
+      $('morphs').replaceChildren(); $('btn-convert').disabled = true;
+      $('empty-hint').hidden = false; $('viewport-error').hidden = true;
+      materialPanel.load();
+    }
+    $('filter-input').value = data.browser.filter; $('only-3d').checked = data.browser.only3d;
+    let directory = data.browser.directory;
+    if (!directory || !(await api.stat(directory).catch(() => null))?.isDir) directory = data.model ? dirname(data.model.path) : dirname(result.filePath);
+    await navigate(directory, data.model ? basename(data.model.path) : null);
+    let changed;
+    state.restoring = true; // controls are driven through their own events; keep those out of the saved defaults
+    try { changed = restoreWorkspaceState(data, viewer, state, materialPanel, applyRenderMode, applyOutline); }
+    finally { state.restoring = false; }
+    $('convert-dialog').close(); $('convert-result').hidden = true; state.lastOutput = null;
+    state.workspacePath = result.filePath;
+    document.title = `${basename(result.filePath)} — MMD Canvas`;
+    setStatus(t`워크스페이스 열기 완료: ${result.filePath}${changed ? t(' · 모델 구성이 달라 재질·모프 상태 일부를 생략했습니다.') : ''}`, 'ok');
+  } catch (error) { setStatus(t`워크스페이스 열기 실패: ${error.message}`, 'error'); }
+  finally { state.workspaceBusy = false; updateWorkspaceBar(); }
+}
+$('workspace-open').addEventListener('click', () => openWorkspace());
+$('workspace-save').addEventListener('click', () => saveWorkspace());
+$('workspace-save-as').addEventListener('click', () => saveWorkspace(true));
+api.onOpenFile((filePath) => openPath(filePath));
+
 // ---------------- startup ----------------
 (async () => {
-  const start = await api.startup();
+  const start = startup;
   state.formats = start.formats;
+  loadDialogPrefs();
   const drives = await api.drives().catch(() => []);
   $('drives').replaceChildren(...drives.map((d) => {
     const b = el('button', { textContent: d.replace(/\\$/, ''), title: d });

@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 // PMX 2.0 / 2.1 binary parser. Pure JS, runs in Node and in the browser.
 // Returns the model in its native space (left-handed, Y-up, 1 unit ~= 8cm).
 
@@ -11,7 +12,7 @@ class Reader {
   }
   need(n) {
     if (this.pos + n > this.u8.byteLength) {
-      throw new Error(`PMX: 파일이 예상보다 짧습니다 (offset ${this.pos}, need ${n})`);
+      throw new Error(t`PMX: 파일이 예상보다 짧습니다 (offset ${this.pos}, need ${n})`);
     }
   }
   u8_() { this.need(1); return this.dv.getUint8(this.pos++); }
@@ -24,7 +25,7 @@ class Reader {
   skip(n) { this.need(n); this.pos += n; }
   text() {
     const len = this.i32();
-    if (len < 0) throw new Error('PMX: 잘못된 문자열 길이');
+    if (len < 0) throw new Error(t('PMX: 잘못된 문자열 길이'));
     this.need(len);
     const s = this.decoder.decode(this.u8.subarray(this.pos, this.pos + len));
     this.pos += len;
@@ -61,8 +62,8 @@ export function parsePmx(buffer) {
   const r = new Reader(buffer);
   if (!isPmx(r.u8)) {
     const head = String.fromCharCode(...r.u8.subarray(0, 3));
-    if (head === 'Pmd') throw new Error('PMD(구버전) 포맷은 지원하지 않습니다. PMX Editor에서 PMX로 저장한 뒤 사용하세요.');
-    throw new Error('PMX 파일이 아닙니다 (매직 넘버 불일치)');
+    if (head === 'Pmd') throw new Error(t('PMD(구버전) 포맷은 지원하지 않습니다. PMX Editor에서 PMX로 저장한 뒤 사용하세요.'));
+    throw new Error(t('PMX 파일이 아닙니다 (매직 넘버 불일치)'));
   }
   r.skip(4);
   const version = r.f32();
@@ -116,7 +117,7 @@ export function parsePmx(buffer) {
         if (type === 4) deformCounts.QDEF++; else deformCounts.BDEF4++;
         break;
       default:
-        throw new Error(`PMX: 알 수 없는 스키닝 타입 ${type} (vertex ${i})`);
+        throw new Error(t`PMX: 알 수 없는 스키닝 타입 ${type} (vertex ${i})`);
     }
     edgeScale[i] = r.f32();
   }
@@ -162,7 +163,7 @@ export function parsePmx(buffer) {
     model.materials.push(m);
   }
   if (indexStart !== iCount) {
-    model.warnings.push(`재질의 면 인덱스 합계(${indexStart})가 전체 인덱스 수(${iCount})와 다릅니다.`);
+    model.warnings.push(t`재질의 면 인덱스 합계(${indexStart})가 전체 인덱스 수(${iCount})와 다릅니다.`);
   }
 
   // ---- bones ----
@@ -216,7 +217,7 @@ export function parsePmx(buffer) {
         r.skip(n * (vSize + 16)); break;
       case MORPH_TYPE.MATERIAL: r.skip(n * (mSize + 1 + 112)); break;
       case MORPH_TYPE.IMPULSE: r.skip(n * (rbSize + 1 + 24)); break;
-      default: throw new Error(`PMX: 알 수 없는 모프 타입 ${mp.type}`);
+      default: throw new Error(t`PMX: 알 수 없는 모프 타입 ${mp.type}`);
     }
     mp.count = n;
     model.morphs.push(mp);
@@ -239,7 +240,7 @@ export function parsePmx(buffer) {
     for (let i = 0; i < jCount; i++) { r.text(); r.text(); r.skip(1 + rbSize * 2 + 96); }
     model.jointCount = jCount;
   } catch (e) {
-    model.warnings.push('표시 프레임/물리 섹션을 끝까지 읽지 못했습니다 (변환에는 영향 없음).');
+    model.warnings.push(t('표시 프레임/물리 섹션을 끝까지 읽지 못했습니다 (변환에는 영향 없음).'));
   }
   return model;
 }

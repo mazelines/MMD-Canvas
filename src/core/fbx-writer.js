@@ -10,7 +10,7 @@ const FOOT_MAGIC = Buffer.from('f85a8c6adef5d97eece90ce3758f290b', 'hex');
 const FILE_ID = Buffer.from('28b32aebb624ccc2bfc8b02aa92bfcf1', 'hex');
 const CREATION_TIME = '1970-01-01 10:00:00:000';
 const SENTINEL = Buffer.alloc(13);
-const CREATOR = 'MMD Converter 0.1';
+const CREATOR = 'MMD Canvas';
 
 // ---------- typed property constructors ----------
 const I = (v) => ({ t: 'I', v });
@@ -424,8 +424,8 @@ export function writeFbx(scene, textureMap = new Map(), options = {}) {
       node('Properties70', [], [
         P('DocumentUrl', 'KString', 'Url', '', S(options.fileName || '')),
         P('SrcDocumentUrl', 'KString', 'Url', '', S(options.fileName || '')),
-        P('Original|ApplicationName', 'KString', '', '', S('MMD Converter')),
-        P('LastSaved|ApplicationName', 'KString', '', '', S('MMD Converter')),
+        P('Original|ApplicationName', 'KString', '', '', S('MMD Canvas')),
+        P('LastSaved|ApplicationName', 'KString', '', '', S('MMD Canvas')),
       ]),
     ]),
   ]);
