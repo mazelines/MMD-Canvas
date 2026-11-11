@@ -22,9 +22,10 @@
     <button id="btn-convert" class="primary" disabled title="현재 PMX를 FBX / USD로 변환 (Ctrl+E)">변환…</button>
     <button id="btn-batch" title="현재 폴더의 PMX를 한꺼번에 변환">폴더 일괄 변환…</button>
     <div class="spacer"></div>
-    <label class="slider" title="조명 세기 (더블클릭: 기본값)">조명
-      <input type="range" id="light-intensity" min="0" max="3" step="0.05" value="1">
-      <span id="light-value">100%</span>
+    <label class="slider light-lux" title="방향광 조도 (lux, 더블클릭: 10 lux)">조도
+      <input type="range" id="light-intensity" aria-label="방향광 조도" min="0" max="100" step="0.01" value="10">
+      <input type="number" id="light-intensity-number" aria-label="방향광 조도 (lux)" min="0" max="200000" step="0.01" value="10">
+      <span id="light-value">lux</span>
     </label>
     <label class="toggle" title="PCSS 소프트 섀도 — 접촉부는 선명하고 멀어질수록 부드러워집니다"><input type="checkbox" id="flag-shadow" checked>그림자</label>
     <label class="slider" title="그림자 부드러움 — 광원 크기 (더블클릭: 기본값)">부드러움
@@ -67,6 +68,11 @@
 
     <section id="viewport">
       <div id="canvas-host"></div>
+      <div class="exposure-controls" role="group" aria-label="수동 노출">
+        <label title="EV100을 높이면 화면이 어두워집니다.">EV100 <input id="exposure-ev100" type="number" min="-10" max="24" step="0.1" value="0" aria-label="노출 EV100"></label>
+        <label title="양수는 밝게, 음수는 어둡게 보정합니다.">보정 <input id="exposure-compensation" type="number" min="-10" max="10" step="0.1" value="0" aria-label="노출 보정 EV"><span>EV</span></label>
+        <button id="exposure-reset" title="노출 기본값 복원" aria-label="노출 기본값 복원">↺</button>
+      </div>
       <div class="viewport-modes" role="group" aria-label="뷰포트 렌더링 모드">
         <div class="viewport-mode-buttons">
         <button id="mode-lambert" class="viewport-mode" data-mode="lambert" aria-label="Lambert 렌더링" aria-pressed="true" title="Lambert — 부드러운 명암">

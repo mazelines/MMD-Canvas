@@ -42,6 +42,77 @@ app.on('open-file', (event, filePath) => {
   else pendingOpenFile = filePath;
 });
 
+/**
+ * Application menu. The renderer owns the actions, their state and their keyboard shortcuts:
+ * accelerators are shown but not registered (registering them too would run each action twice),
+ * and checked states are pushed from the renderer through 'menu:state'.
+ */
+function buildMenu() {
+  const send = (command) => () => win?.webContents.send('menu:command', command);
+  const item = (label, command, accelerator) => ({ label, accelerator, registerAccelerator: false, click: send(command) });
+  const check = (label, id) => ({ id, label, type: 'checkbox', click: send(`toggle:${id}`) });
+  const mode = (label, name) => ({ id: `mode-${name}`, label, type: 'radio', checked: name === 'lambert', click: send(`mode:${name}`) });
+  return Menu.buildFromTemplate([
+    {
+      label: t('파일'),
+      submenu: [
+        item(t('파일 열기…'), 'open-file', 'CmdOrCtrl+O'),
+        item(t('워크스페이스 열기…'), 'workspace-open', 'CmdOrCtrl+Shift+O'),
+        { type: 'separator' },
+        item(t('워크스페이스 저장'), 'workspace-save', 'CmdOrCtrl+S'),
+        item(t('다른 이름으로 저장…'), 'workspace-save-as', 'CmdOrCtrl+Shift+S'),
+        { type: 'separator' },
+        { label: t('끝내기'), role: 'quit' },
+      ],
+    },
+    {
+      label: t('변환'),
+      submenu: [
+        item(t('현재 PMX 변환…'), 'convert', 'CmdOrCtrl+E'),
+        item(t('폴더 일괄 변환…'), 'batch'),
+      ],
+    },
+    {
+      label: t('보기'),
+      submenu: [
+        item(t('맞춰 보기'), 'frame', 'F'),
+        { type: 'separator' },
+        mode('Lambert', 'lambert'),
+        mode('Toon', 'toon'),
+        { type: 'separator' },
+        check(t('그리드'), 'flag-grid'),
+        check(t('본'), 'flag-skeleton'),
+        check(t('와이어프레임'), 'flag-wireframe'),
+        { type: 'separator' },
+        check(t('그림자'), 'flag-shadow'),
+        check(t('광원 기즈모'), 'flag-light-gizmo'),
+        item(t('광원 방향 초기화'), 'light-reset'),
+        { type: 'separator' },
+        { label: t('새로 고침'), accelerator: 'F5', registerAccelerator: false, click: () => win?.webContents.reload() },
+        { label: t('개발자 도구'), accelerator: 'F12', registerAccelerator: false, click: () => win?.webContents.toggleDevTools() },
+      ],
+    },
+    {
+      label: t('도움말'),
+      submenu: [{
+        label: t('MMD Canvas 정보'),
+        click: () => dialog.showMessageBox(win, { type: 'info', title: t('MMD Canvas 정보'), message: 'MMD Canvas', detail: t`버전 ${app.getVersion()}` }),
+      }],
+    },
+  ]);
+}
+
+ipcMain.on('menu:state', (_event, state) => {
+  const menu = Menu.getApplicationMenu();
+  if (!menu || !state) return;
+  for (const [id, checked] of Object.entries(state)) {
+    const entry = menu.getMenuItemById(id);
+    if (!entry) continue;
+    // a radio item is only ever selected; its siblings clear themselves
+    if (entry.type === 'radio') { if (checked) entry.checked = true; } else entry.checked = !!checked;
+  }
+});
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1440,
@@ -57,7 +128,7 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
-  Menu.setApplicationMenu(null);
+  Menu.setApplicationMenu(buildMenu());
   win.loadURL('app://ui/renderer/index.html');
   win.webContents.on('before-input-event', (_e, input) => {
     if (input.type !== 'keyDown') return;

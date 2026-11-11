@@ -2,6 +2,7 @@ import { t } from '../i18n/index.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { MAX_LIGHT_LUX, legacyLightToLux, LEGACY_EV100, MIN_EV100, MAX_EV100, MAX_EXPOSURE_COMPENSATION, MAX_EMISSIVE_NITS } from './lighting.js';
 
 export const WORKSPACE_FORMAT = 'mmd-canvas-workspace';
 export const WORKSPACE_VERSION = 1;
@@ -24,15 +25,21 @@ export function validateWorkspace(value) {
   const b = object(d.browser, 'browser'), v = object(d.viewport, 'viewport');
   const c = object(d.conversion, 'conversion'), i = object(d.inspector, 'inspector');
   const camera = object(v.camera, 'camera'), outline = object(v.outline, 'outline'), flags = object(v.flags, 'flags');
+  const exposure = v.exposure === undefined ? { ev100: LEGACY_EV100, compensation: 0 } : object(v.exposure, 'exposure');
   const result = {
     format: WORKSPACE_FORMAT, version: WORKSPACE_VERSION,
     browser: { directory: nullablePath(b.directory, 'directory'), filter: string(b.filter, 'filter', 4096), only3d: bool(b.only3d, 'only3d') },
     model: null,
     viewport: {
+      exposure: { ev100: number(exposure.ev100, 'exposure.ev100', MIN_EV100, MAX_EV100),
+        compensation: number(exposure.compensation, 'exposure.compensation', -MAX_EXPOSURE_COMPENSATION, MAX_EXPOSURE_COMPENSATION) },
       mode: choice(v.mode, 'mode', ['lambert', 'toon']),
       outline: { width: number(outline.width, 'outline.width', 0, 8), color: /^#[0-9a-f]{6}$/i.test(outline.color) ? outline.color : fail('outline.color') },
       flags: Object.fromEntries(['grid', 'skeleton', 'wireframe'].map((key) => [key, bool(flags[key], key)])),
-      lightIntensity: number(v.lightIntensity, 'lightIntensity', 0, 3), lightDirection: vector(v.lightDirection, 'lightDirection'),
+      lightUnit: v.lightUnit === undefined ? 'lux' : choice(v.lightUnit, 'lightUnit', ['lux']),
+      lightIntensity: v.lightUnit === undefined ? legacyLightToLux(number(v.lightIntensity, 'lightIntensity', 0, 3))
+        : number(v.lightIntensity, 'lightIntensity', 0, MAX_LIGHT_LUX),
+      lightDirection: vector(v.lightDirection, 'lightDirection'),
       shadowEnabled: bool(v.shadowEnabled, 'shadowEnabled'), shadowSoftness: number(v.shadowSoftness, 'shadowSoftness', 0, 0.12),
       gizmo: bool(v.gizmo, 'gizmo'), gizmoSpace: choice(v.gizmoSpace, 'gizmoSpace', ['local', 'world']),
       gizmoMode: choice(v.gizmoMode, 'gizmoMode', ['translate', 'rotate']), gizmoPosition: vector(v.gizmoPosition, 'gizmoPosition'),
@@ -60,7 +67,8 @@ export function validateWorkspace(value) {
     const m = object(d.model, 'model');
     result.model = {
       path: string(m.path, 'model.path'),
-      materials: list(m.materials, 'materials', (item) => ({ name: string(object(item, 'material').name, 'material.name', 4096), visible: bool(item.visible, 'visible') })),
+      materials: list(m.materials, 'materials', (item) => ({ name: string(object(item, 'material').name, 'material.name', 4096), visible: bool(item.visible, 'visible'),
+        emissiveNits: item.emissiveNits === undefined || item.emissiveNits === null ? null : number(item.emissiveNits, 'material.emissiveNits', 0, MAX_EMISSIVE_NITS) })),
       morphs: list(m.morphs, 'morphs', (item) => ({ name: string(object(item, 'morph').name, 'morph.name', 4096), weight: number(item.weight, 'weight', 0, 1) })),
     };
     if (!result.model.path) fail('model.path');

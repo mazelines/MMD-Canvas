@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('api', {
   saveFile: (defaultPath, format) => call('dialog:saveFile', defaultPath, format),
   openWorkspace: (filePath = null) => call('workspace:open', filePath),
   saveWorkspace: (data, filePath = null, saveAs = false) => call('workspace:save', data, filePath, saveAs),
+  menuState: (state) => ipcRenderer.send('menu:state', state),
+  onMenuCommand: (fn) => ipcRenderer.on('menu:command', (_event, command) => fn(command)),
   onOpenFile: (fn) => ipcRenderer.on('app:open-file', (_event, filePath) => fn(filePath)),
   convertFile: (input, output, options) => call('convert:file', input, output, options),
   convertBatch: (dir, outDir, format, recursive, options) => call('convert:batch', dir, outDir, format, recursive, options),

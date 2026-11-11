@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { createHullMaterial, createHullMesh } from './hull-outline.js';
 import { SmoothHullGeometry } from './smooth-normals.js';
+import { MAX_EMISSIVE_NITS, sourceEmissionNits } from '../src/core/lighting.js';
 
 const SURFACE_KEYS = [
   'color', 'map', 'lightMap', 'lightMapIntensity', 'aoMap', 'aoMapIntensity',
@@ -29,7 +30,7 @@ export class ViewportShading {
       this.bindings.push({ mesh, original: mesh.material });
       for (const source of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
         if (!source || source.isShaderMaterial || this.records.has(source)) continue;
-        this.records.set(source, { source, variants: {}, hull: createHullMaterial(source, viewport, this.outlineWidth) });
+        this.records.set(source, { source, variants: {}, emissiveNits: null, hull: createHullMaterial(source, viewport, this.outlineWidth) });
       }
     });
     this.mode = 'lambert';
@@ -52,8 +53,7 @@ export class ViewportShading {
     const record = this.records.get(source);
     if (!record) return source; // custom shaders keep their own rendering contract
     if (!record.variants[mode]) {
-      const material = mode === 'lambert' && source.isMeshLambertMaterial ? source
-        : mode === 'toon' ? new THREE.MeshToonMaterial() : new THREE.MeshLambertMaterial();
+      const material = mode === 'toon' ? new THREE.MeshToonMaterial() : new THREE.MeshLambertMaterial();
       if (material !== source) {
         THREE.Material.prototype.copy.call(material, source);
         delete material.userData.shPatched;
@@ -65,7 +65,7 @@ export class ViewportShading {
   }
 
   sync() {
-    for (const { source, variants, hull } of this.records.values()) {
+    for (const { source, variants, hull, emissiveNits } of this.records.values()) {
       let hullChanged = false;
       for (const key of ['map', 'alphaMap', 'opacity', 'transparent']) {
         if (hull[key] !== (source[key] ?? (key === 'opacity' ? 1 : key === 'transparent' ? false : null))) {
@@ -81,15 +81,30 @@ export class ViewportShading {
         if (material === source) continue;
         let changed = false;
         for (const key of SURFACE_KEYS) {
+          if (key === 'emissiveIntensity') continue;
           if (!(key in source) || !(key in material)) continue;
           const value = source[key];
           if (value?.isColor || value?.isVector2) material[key].copy(value);
           else if (material[key] !== value) { material[key] = value; changed = true; }
         }
+        material.emissiveIntensity = emissiveNits ?? sourceEmissionNits(source);
         // A late PMX alpha/texture load can change the required shader defines.
         if (changed) material.needsUpdate = true;
       }
     }
+  }
+
+  getEmission(source) {
+    const record = this.records.get(source);
+    if (!record || !source.emissive?.isColor) return null;
+    return { nits: record.emissiveNits ?? sourceEmissionNits(source), override: record.emissiveNits };
+  }
+
+  setEmission(source, nits) {
+    const record = this.records.get(source);
+    if (!record || !source.emissive?.isColor || (nits !== null && !Number.isFinite(nits))) return;
+    record.emissiveNits = nits === null ? null : Math.max(0, Math.min(MAX_EMISSIVE_NITS, nits));
+    this.sync();
   }
 
   apply(mode) {

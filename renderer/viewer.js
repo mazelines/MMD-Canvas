@@ -13,6 +13,7 @@ import { SoftShadows } from './shadows.js';
 import { collectMaterials } from './material-info.js';
 import { ViewportShading } from './viewport-shading.js';
 import { LinearViewportPipeline } from './color-pipeline.js';
+import { DEFAULT_LIGHT_LUX, clampLightLux } from '../src/core/lighting.js';
 
 export const VIEWABLE = ['.pmx', '.fbx', '.glb', '.gltf', '.obj', '.stl', '.ply', '.dae', '.3mf', '.usdz', '.usda', '.usd', '.usdc'];
 
@@ -35,7 +36,7 @@ export class Viewer {
     this.scene.background = new THREE.Color(0x22252c);
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    this.scene.environmentIntensity = 0.6;
+    this.scene.environmentIntensity = 0;
 
     this.camera = new THREE.PerspectiveCamera(35, 1, 0.1, 5000);
     this.camera.position.set(0, 12, 40);
@@ -44,12 +45,14 @@ export class Viewer {
     this.controls.dampingFactor = 0.12;
     this.controls.addEventListener('change', () => this.requestRender());
 
-    this.hemi = new THREE.HemisphereLight(0xffffff, 0xb4b8c0, 2.2);
-    this.sun = new THREE.DirectionalLight(0xffffff, 0.9);
+    // No implicit sky/fill energy: the lux control measures the directional light only.
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0xb4b8c0, 0);
+    this.sun = new THREE.DirectionalLight(0xffffff, DEFAULT_LIGHT_LUX);
     this.sun.position.set(-0.4, 1, 0.8);
     this.scene.add(this.hemi, this.sun);
 
     this.grid = new THREE.GridHelper(10, 10, 0x5a6070, 0x363a44);
+    this.colorPipeline.protectEditorObject(this.grid);
     this.scene.add(this.grid);
 
     this.root = new THREE.Group();
@@ -66,7 +69,7 @@ export class Viewer {
     this.shadows = new SoftShadows(this.renderer);
     this.scene.add(this.shadows.ground);
     this.shadow = { enabled: false, softness: 0.03, dirty: false };
-    this.lightLevel = 1;
+    this.lightLevel = DEFAULT_LIGHT_LUX;
 
     // light direction gizmo: a sun icon + rotate handles, like a directional light in an engine editor
     this.lightRig = makeSunIcon();
@@ -78,6 +81,8 @@ export class Viewer {
     this.lightControls.setSize(0.75);
     this.lightControls.attach(this.lightRig);
     this.lightGizmo = this.lightControls.getHelper();
+    this.colorPipeline.protectEditorObject(this.lightRig);
+    this.colorPipeline.protectEditorObject(this.lightGizmo);
     this.scene.add(this.lightGizmo);
     this.lightControls.addEventListener('dragging-changed', (ev) => { this.controls.enabled = !ev.value; });
     this.lightControls.addEventListener('change', () => this.requestRender());
@@ -106,6 +111,7 @@ export class Viewer {
     this.renderMode = mode;
     if (this.current) {
       this.current.shading.apply(mode);
+      for (const binding of this.current.shading.bindings) if (binding.hull) this.colorPipeline.protectEditorObject(binding.hull);
       this.shadows.patch(this.current.object);
     }
     this.setLightIntensity(this.lightLevel);
@@ -126,15 +132,29 @@ export class Viewer {
     this.requestRender();
   }
 
-  /** Overall light level; 1 = default. Scales all three light sources together. */
-  setLightIntensity(k) {
-    this.lightLevel = k;
-    // with shadows on, the sun carries more of the light so the shadows actually read
-    // Toon uses one stable palette; toggling cast shadows must not change both tones.
-    const traced = this.renderMode === 'toon' || this.shadow.enabled;
-    this.hemi.intensity = (traced ? 1.3 : 2.2) * k;
-    this.sun.intensity = (traced ? 1.8 : 0.9) * k;
-    this.scene.environmentIntensity = 0.6 * k;
+  /** Physical directional-light illuminance; passed unchanged to the light uniform. */
+  setLightIntensity(lux) {
+    this.lightLevel = clampLightLux(lux);
+    this.sun.intensity = this.lightLevel;
+    this.requestRender();
+  }
+
+  get exposure() { return this.colorPipeline.exposure; }
+
+  setExposure(ev100, compensation = 0) {
+    this.colorPipeline.setExposure(ev100, compensation);
+    this.requestRender();
+  }
+
+  getMaterialEmission(index) {
+    const source = this.current?.materials[index]?.material;
+    return source ? this.current.shading.getEmission(source) : null;
+  }
+
+  setMaterialEmission(index, nits) {
+    const source = this.current?.materials[index]?.material;
+    if (!source) return;
+    this.current.shading.setEmission(source, nits);
     this.requestRender();
   }
 
@@ -253,6 +273,7 @@ export class Viewer {
     loaded.info.materialNames = loaded.materials.map((entry) => entry.name);
     loaded.shading = new ViewportShading(loaded.object, new THREE.Vector2(this.container.clientWidth || 1, this.container.clientHeight || 1), this.outlineSettings);
     loaded.shading.apply(this.renderMode);
+    for (const binding of loaded.shading.bindings) if (binding.hull) this.colorPipeline.protectEditorObject(binding.hull);
     this.root.add(loaded.object);
     this.shadows.patch(loaded.object);
     this.applyFlags();
@@ -515,9 +536,11 @@ export class Viewer {
     // grid sized to the model, sitting at its feet
     this.scene.remove(this.grid);
     this.grid.geometry.dispose();
+    this.grid.material.dispose();
     const step = Math.pow(10, Math.floor(Math.log10(Math.max(size.x, size.y, size.z) / 4 || 1)));
     const cells = Math.max(10, Math.ceil((Math.max(size.x, size.z) * 2.5) / step / 2) * 2);
     this.grid = new THREE.GridHelper(step * cells, cells, 0x5a6070, 0x363a44);
+    this.colorPipeline.protectEditorObject(this.grid);
     this.grid.position.set(Math.round(center.x / step) * step, box.min.y, Math.round(center.z / step) * step);
     this.grid.visible = this.flags.grid;
     this.scene.add(this.grid);
@@ -560,6 +583,7 @@ export class Viewer {
     group.traverse((o) => { o.renderOrder = 999; });
     group.visible = this.flags.skeleton;
     this.skeleton = group;
+    this.colorPipeline.protectEditorObject(group);
     this.scene.add(group);
     void radius;
   }

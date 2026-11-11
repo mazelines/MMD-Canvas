@@ -1,8 +1,9 @@
 // GT7 SDR color-volume mapping, adapted from Polyphony Digital's SIGGRAPH 2025
 // reference (MIT). Reference equations are also implemented by Google Filament.
 // See docs/color-pipeline.md and licenses/GT7-MIT.txt for sources and license.
+import { REFERENCE_LUMINANCE } from '../src/core/lighting.js';
 export const GT7_SDR = Object.freeze({
-  referenceLuminance: 100, displayPeakLuminance: 250, sdrCorrection: 0.4,
+  referenceLuminance: REFERENCE_LUMINANCE, displayPeakLuminance: 250, sdrCorrection: 0.4,
   alpha: 0.25, grayPoint: 0.538, linearSection: 0.444, toeStrength: 1.280,
   blendRatio: 0.6, fadeStart: 0.98, fadeEnd: 1.16,
 });

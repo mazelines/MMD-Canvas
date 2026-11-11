@@ -2,6 +2,7 @@ import { t, setLanguage, getLanguage, formatNumber, translateStatic } from '../s
 import { Viewer, VIEWABLE } from './viewer.js';
 import { MaterialPanel } from './material-panel.js';
 import { captureWorkspace, restoreWorkspaceState } from './workspace-state.js';
+import { DEFAULT_LIGHT_LUX, DEFAULT_EV100, clampLightLux, legacyLightToLux } from '../src/core/lighting.js';
 
 const api = window.api;
 const startup = await api.startup();
@@ -294,6 +295,24 @@ $('btn-reset-morphs').addEventListener('click', () => {
 });
 
 // ---------------- toolbar ----------------
+{
+  const ev = $('exposure-ev100'), compensation = $('exposure-compensation');
+  const apply = (ev100, offset, save) => {
+    if (!Number.isFinite(ev100) || !Number.isFinite(offset)) return;
+    viewer.setExposure(ev100, offset);
+    ev.value = String(viewer.exposure.ev100); compensation.value = String(viewer.exposure.compensation);
+    if (save && !state.restoring) localStorage.setItem('viewportExposure', JSON.stringify(viewer.exposure));
+  };
+  for (const input of [ev, compensation]) {
+    input.addEventListener('input', () => apply(ev.valueAsNumber, compensation.valueAsNumber, true));
+    input.addEventListener('blur', () => apply(viewer.exposure.ev100, viewer.exposure.compensation, false));
+  }
+  $('exposure-reset').addEventListener('click', () => apply(DEFAULT_EV100, 0, true));
+  try {
+    const saved = JSON.parse(localStorage.getItem('viewportExposure') || 'null');
+    if (saved) apply(saved.ev100, saved.compensation, false);
+  } catch { /* ignore malformed preferences */ }
+}
 $('btn-open').addEventListener('click', async () => {
   const p = await api.openFile(state.dir);
   if (p) openPath(p);
@@ -303,18 +322,24 @@ for (const flag of ['grid', 'skeleton', 'wireframe']) {
   $(`flag-${flag}`).addEventListener('change', (ev) => viewer.setFlag(flag, ev.target.checked));
 }
 {
-  const slider = $('light-intensity');
-  const apply = (save) => {
-    const k = Number(slider.value);
-    viewer.setLightIntensity(k);
-    $('light-value').textContent = `${Math.round(k * 100)}%`;
-    if (save && !state.restoring) localStorage.setItem('lightIntensity', String(k));
+  const slider = $('light-intensity'), input = $('light-intensity-number');
+  const apply = (value, save) => {
+    if (!Number.isFinite(value)) return;
+    const lux = clampLightLux(value);
+    slider.max = String(Math.max(100, Math.ceil(lux / 100) * 100));
+    slider.value = input.value = String(lux);
+    viewer.setLightIntensity(lux);
+    if (save && !state.restoring) localStorage.setItem('lightIlluminanceLux', String(lux));
   };
-  const saved = Number(localStorage.getItem('lightIntensity'));
-  if (localStorage.getItem('lightIntensity') !== null && Number.isFinite(saved)) slider.value = String(saved);
-  slider.addEventListener('input', () => apply(true));
-  slider.addEventListener('dblclick', () => { slider.value = '1'; apply(true); });
-  apply(false);
+  const saved = localStorage.getItem('lightIlluminanceLux');
+  const legacy = localStorage.getItem('lightIntensity');
+  const initial = saved !== null && Number.isFinite(Number(saved)) ? Number(saved)
+    : legacy !== null && Number.isFinite(Number(legacy)) ? legacyLightToLux(Number(legacy)) : DEFAULT_LIGHT_LUX;
+  slider.addEventListener('input', () => apply(slider.valueAsNumber, true));
+  input.addEventListener('input', () => apply(input.valueAsNumber, true));
+  input.addEventListener('blur', () => apply(viewer.lightLevel, false));
+  slider.addEventListener('dblclick', () => apply(DEFAULT_LIGHT_LUX, true));
+  apply(initial, false);
 }
 {
   // soft shadows: toggle + softness (0..100 -> tan of the light's angular radius)
@@ -567,7 +592,7 @@ async function openWorkspace(filePath = null) {
     let changed;
     state.restoring = true; // controls are driven through their own events; keep those out of the saved defaults
     try { changed = restoreWorkspaceState(data, viewer, state, materialPanel, applyRenderMode, applyOutline); }
-    finally { state.restoring = false; }
+    finally { state.restoring = false; reportMenuState(); }
     $('convert-dialog').close(); $('convert-result').hidden = true; state.lastOutput = null;
     state.workspacePath = result.filePath;
     document.title = `${basename(result.filePath)} — MMD Canvas`;
@@ -579,6 +604,35 @@ $('workspace-open').addEventListener('click', () => openWorkspace());
 $('workspace-save').addEventListener('click', () => saveWorkspace());
 $('workspace-save-as').addEventListener('click', () => saveWorkspace(true));
 api.onOpenFile((filePath) => openPath(filePath));
+// ---------------- application menu ----------------
+const MENU_FLAGS = ['flag-grid', 'flag-skeleton', 'flag-wireframe', 'flag-shadow', 'flag-light-gizmo'];
+function reportMenuState() {
+  const menuState = Object.fromEntries(MENU_FLAGS.map((id) => [id, $(id).checked]));
+  menuState['mode-lambert'] = viewer.renderMode !== 'toon';
+  menuState['mode-toon'] = viewer.renderMode === 'toon';
+  api.menuState(menuState);
+}
+for (const id of MENU_FLAGS) $(id).addEventListener('change', reportMenuState);
+document.querySelectorAll('.viewport-mode').forEach((button) => button.addEventListener('click', reportMenuState));
+api.onMenuCommand((command) => {
+  const [kind, target] = command.split(':');
+  if (command === 'open-file') $('btn-open').click();
+  else if (command === 'workspace-open') openWorkspace();
+  else if (command === 'workspace-save') saveWorkspace();
+  else if (command === 'workspace-save-as') saveWorkspace(true);
+  else if (command === 'convert') { if (!$('btn-convert').disabled) $('btn-convert').click(); }
+  else if (command === 'batch') $('btn-batch').click();
+  else if (command === 'frame') viewer.frame();
+  else if (command === 'light-reset') $('btn-light-reset').click();
+  else if (kind === 'mode') $(`mode-${target}`).click();
+  else if (kind === 'toggle' && MENU_FLAGS.includes(target)) {
+    $(target).checked = !$(target).checked;
+    $(target).dispatchEvent(new Event('change'));
+  }
+  reportMenuState();
+});
+reportMenuState();
+
 
 // ---------------- startup ----------------
 (async () => {

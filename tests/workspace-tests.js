@@ -4,14 +4,15 @@ import path from 'node:path';
 import { validateWorkspace, encodeWorkspace, decodeWorkspace, readWorkspace, writeWorkspace, networkPaths } from '../src/core/workspace.js';
 import { getLanguage, setLanguage, resolveLanguage, t } from '../src/i18n/index.js';
 import { messages } from '../src/i18n/messages.js';
+import { LEGACY_EV100, exposureScale } from '../src/core/lighting.js';
 
 export function sampleWorkspace() {
   return {
     format: 'mmd-canvas-workspace', version: 1,
     browser: { directory: 'C:\\project\\models', filter: 'モデル', only3d: true },
-    model: { path: 'C:\\project\\models\\캐릭터.pmx', materials: [{ name: '体', visible: false }], morphs: [{ name: 'あ', weight: 0.5 }] },
-    viewport: { mode: 'toon', outline: { width: 2.7, color: '#ab3344' }, flags: { grid: false, skeleton: true, wireframe: false },
-      lightIntensity: 1.7, lightDirection: [1, 2, 3], shadowEnabled: true, shadowSoftness: 0.04, gizmo: true,
+    model: { path: 'C:\\project\\models\\캐릭터.pmx', materials: [{ name: '体', visible: false, emissiveNits: 250 }], morphs: [{ name: 'あ', weight: 0.5 }] },
+    viewport: { exposure: { ev100: 2.5, compensation: 1 }, mode: 'toon', outline: { width: 2.7, color: '#ab3344' }, flags: { grid: false, skeleton: true, wireframe: false },
+      lightIntensity: 12500.5, lightUnit: 'lux', lightDirection: [1, 2, 3], shadowEnabled: true, shadowSoftness: 0.04, gizmo: true,
       gizmoSpace: 'world', gizmoMode: 'rotate', gizmoPosition: [1, 4, 5],
       camera: { position: [2, 4, 7], target: [0, 1, 0], up: [0, 1, 0], fov: 35, zoom: 1, near: 0.1, far: 100, maxDistance: 50 } },
     conversion: { mode: 'single', format: 'usdz', output: 'C:\\project\\export\\キャラクター.usdz', source: 'C:\\project\\models\\캐릭터.pmx', scale: 8, nameMode: 'english', morphs: true, copyTextures: true, asciiNames: true, recursive: false },
@@ -20,6 +21,34 @@ export function sampleWorkspace() {
 }
 
 export function registerWorkspaceTests(test) {
+  test('workspace: exposure and emission migration preserves the previous fixed output scale', () => {
+    const old = sampleWorkspace();
+    delete old.viewport.exposure; delete old.model.materials[0].emissiveNits;
+    const restored = validateWorkspace(old);
+    assert.equal(restored.viewport.exposure.ev100, LEGACY_EV100);
+    assert.ok(Math.abs(exposureScale(LEGACY_EV100, 0) - 1) < 1e-12);
+    assert.equal(restored.model.materials[0].emissiveNits, null);
+    assert.deepEqual(validateWorkspace(restored), restored);
+    assert.equal(exposureScale(1, 0), exposureScale(0, 0) / 2);
+    assert.equal(exposureScale(1, 1), exposureScale(0, 0));
+    restored.viewport.exposure.ev100 = 25;
+    assert.throws(() => validateWorkspace(restored));
+    restored.viewport.exposure.ev100 = 0; restored.model.materials[0].emissiveNits = -1;
+    assert.throws(() => validateWorkspace(restored));
+  });
+  test('workspace: lux values round-trip and legacy multipliers migrate exactly once', () => {
+    const workspace = sampleWorkspace();
+    assert.equal(validateWorkspace(workspace).viewport.lightIntensity, 12500.5);
+    delete workspace.viewport.lightUnit; workspace.viewport.lightIntensity = 1;
+    const migrated = validateWorkspace(workspace);
+    assert.equal(migrated.viewport.lightUnit, 'lux');
+    assert.equal(migrated.viewport.lightIntensity, 6);
+    assert.equal(validateWorkspace(migrated).viewport.lightIntensity, 6);
+    workspace.viewport.lightUnit = 'candela';
+    assert.throws(() => validateWorkspace(workspace));
+    workspace.viewport.lightUnit = 'lux'; workspace.viewport.lightIntensity = 200001;
+    assert.throws(() => validateWorkspace(workspace));
+  });
   test('workspace: Windows paths relocate as a bundle and cross-drive paths remain absolute', () => {
     const workspace = sampleWorkspace();
     const encoded = encodeWorkspace(workspace, 'C:\\project\\scene.canvas', path.win32);

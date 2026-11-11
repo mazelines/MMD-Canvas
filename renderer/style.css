@@ -54,6 +54,18 @@ input:focus-visible, select:focus-visible, button:focus-visible, #file-list:focu
 .slider { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; margin-right: 8px; }
 .slider input { width: 110px; accent-color: var(--accent); margin: 0; }
 .slider span { width: 38px; font-variant-numeric: tabular-nums; }
+.light-lux #light-intensity { width: 80px; }
+.light-lux #light-intensity-number { width: 78px; padding: 3px 5px; background: #12141a; border: 1px solid var(--line); border-radius: 4px; font-variant-numeric: tabular-nums; }
+.light-lux #light-value { width: auto; }
+.exposure-controls { position: absolute; top: 12px; left: 12px; z-index: 5; display: flex; flex-direction: column; gap: 5px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: #1d2027eb; color: var(--muted); font-size: 11px; }
+.exposure-controls label { display: flex; align-items: center; gap: 5px; }
+.exposure-controls input { width: 66px; margin-left: auto; padding: 2px 4px; border: 1px solid var(--line); background: #12141a; border-radius: 3px; }
+#exposure-reset { align-self: flex-end; border: 0; padding: 0 4px; background: transparent; }
+#viewport { container-type: inline-size; }
+@container (max-width: 420px) { .exposure-controls { top: auto; bottom: 12px; } }
+.emission-control { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.emission-control input { width: 95px; min-width: 0; padding: 3px 5px; border: 1px solid var(--line); border-radius: 4px; background: #12141a; }
+.emission-control button { padding: 2px 5px; }
 
 /* ---------- layout ---------- */
 #workspacebar { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 5px 10px; background: #191c23; border-bottom: 1px solid var(--line); font-size: 11px; flex: none; }

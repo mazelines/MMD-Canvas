@@ -4,6 +4,27 @@ import { SmoothHullGeometry } from '../renderer/smooth-normals.js';
 import { ViewportShading } from '../renderer/viewport-shading.js';
 
 export function registerShadingTests(test) {
+  test('emission: physical overrides survive mode changes and leave source materials intact', () => {
+    const source = new THREE.MeshLambertMaterial({ emissive: 0xff8844, emissiveIntensity: 2 });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(), source);
+    const shading = new ViewportShading(mesh);
+    for (const mode of ['lambert', 'toon']) {
+      shading.apply(mode);
+      assert.notEqual(mesh.material, source);
+      assert.equal(mesh.material.emissiveIntensity, 200);
+      shading.setEmission(source, 750);
+      assert.equal(mesh.material.emissiveIntensity, 750);
+      assert.equal(source.emissiveIntensity, 2);
+      assert.equal(shading.getEmission(source).override, 750);
+      shading.setEmission(source, 0);
+      assert.equal(mesh.material.emissiveIntensity, 0);
+      shading.setEmission(source, null);
+      assert.equal(mesh.material.emissiveIntensity, 200);
+    }
+    shading.dispose();
+    assert.equal(mesh.material, source);
+    assert.equal(source.emissiveIntensity, 2);
+  });
   test('outline: hard-edge cube seams weld to angle-weighted normals without changing source channels', () => {
     for (const geometry of [new THREE.BoxGeometry(), new THREE.BoxGeometry().toNonIndexed()]) {
       const sourceNormals = geometry.attributes.normal.array.slice();
