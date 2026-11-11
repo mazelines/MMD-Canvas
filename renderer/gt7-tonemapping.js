@@ -8,6 +8,39 @@ export const GT7_SDR = Object.freeze({
   blendRatio: 0.6, fadeStart: 0.98, fadeEnd: 1.16,
 });
 
+const CURVE = { peak: 2.5, gray: 0.538, section: 0.444, toe: 1.280, k: (0.444 - 1) / (0.25 - 1) };
+function gt7Curve(x) {
+  x = Math.max(x, 0);
+  if (x < CURVE.section * CURVE.peak) {
+    const s = Math.min(Math.max(x / CURVE.gray, 0), 1), blend = s * s * (3 - 2 * s);
+    const toe = CURVE.gray * Math.pow(x / CURVE.gray, CURVE.toe);
+    return toe + (x - toe) * blend;
+  }
+  return CURVE.peak * CURVE.section + CURVE.peak * CURVE.k * (1 - Math.exp((CURVE.section - x / CURVE.peak) / CURVE.k));
+}
+
+/**
+ * Scene-linear value that the GT7 output shows as the display-linear value `c` (per channel; exact for
+ * neutral colours). Editor colours are pre-distorted with it so they come out as authored.
+ */
+export function gt7InverseDisplay(c) {
+  const target = Math.min(Math.max(c, 0), 0.98) / GT7_SDR.sdrCorrection;
+  let lo = 0, hi = 40;
+  for (let i = 0; i < 40; i++) { const mid = (lo + hi) / 2; if (gt7Curve(mid) < target) lo = mid; else hi = mid; }
+  return (lo + hi) / 2;
+}
+
+// GLSL twin of gt7InverseDisplay; needs GT7_GLSL for gt7Curve.
+export const GT7_INVERSE_GLSL = /* glsl */`
+float gt7InverseDisplay(float c) {
+  float target = clamp(c, 0.0, 0.98) / 0.4;
+  float lo = 0.0, hi = 40.0;
+  for (int i = 0; i < 20; i++) { float mid = 0.5 * (lo + hi); if (gt7Curve(mid) < target) lo = mid; else hi = mid; }
+  return 0.5 * (lo + hi);
+}
+vec3 gt7InverseDisplay(vec3 c) { return vec3(gt7InverseDisplay(c.r), gt7InverseDisplay(c.g), gt7InverseDisplay(c.b)); }
+`;
+
 // Input/output are Linear Rec.709. PQ is an internal perceptual transform here,
 // not the display encoding. The only display transfer follows this operation.
 export const GT7_GLSL = /* glsl */`

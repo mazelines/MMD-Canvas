@@ -71,6 +71,7 @@
       <div class="exposure-controls" role="group" aria-label="수동 노출">
         <label title="EV100을 높이면 화면이 어두워집니다.">EV100 <input id="exposure-ev100" type="number" min="-10" max="24" step="0.1" value="0" aria-label="노출 EV100"></label>
         <label title="양수는 밝게, 음수는 어둡게 보정합니다.">보정 <input id="exposure-compensation" type="number" min="-10" max="10" step="0.1" value="0" aria-label="노출 보정 EV"><span>EV</span></label>
+        <label title="주변광 조도 (lux) — 방향광이 닿지 않는 면을 밝히는 하늘·바닥 빛. 0이면 검게 나옵니다.">주변광 <input id="light-ambient-number" type="number" min="0" max="200000" step="0.01" value="2" aria-label="주변광 조도 (lux)"><span>lux</span></label>
         <button id="exposure-reset" title="노출 기본값 복원" aria-label="노출 기본값 복원">↺</button>
       </div>
       <div class="viewport-modes" role="group" aria-label="뷰포트 렌더링 모드">

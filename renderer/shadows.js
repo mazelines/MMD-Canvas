@@ -6,7 +6,7 @@
 // re-rendered when the model or the light changes, so the per-frame cost is a fixed number of taps.
 
 import * as THREE from 'three';
-import { REFERENCE_LUMINANCE } from '../src/core/lighting.js';
+import { applyPhotometricUnits, PHOTOMETRIC_CACHE_KEY } from './photometric.js';
 
 const MAP_SIZE = 4096;
 const BLOCKER_TAPS = 16;
@@ -184,19 +184,10 @@ export class SoftShadows {
           shader.vertexShader = 'varying vec3 vShWorldPos;\n' + shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>\n${WORLD_POS_VERTEX}`);
           shader.fragmentShader = shader.fragmentShader
             .replace('#include <common>', `#include <common>\n${SHADOW_GLSL}`)
-            .replace('#include <lights_fragment_begin>', m.isMeshToonMaterial ? TOON_LIGHTS_CHUNK : LIGHTS_CHUNK)
-            .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
-              // Light uniforms contain lux. Lambert BRDF = diffuse / PI yields cd/m².
-              // Encode the physical result into GT7's 100 cd/m² framebuffer convention.
-              reflectedLight.directDiffuse /= ${REFERENCE_LUMINANCE.toFixed(1)};
-              reflectedLight.directSpecular /= ${REFERENCE_LUMINANCE.toFixed(1)};
-              reflectedLight.indirectDiffuse /= ${REFERENCE_LUMINANCE.toFixed(1)};
-              reflectedLight.indirectSpecular /= ${REFERENCE_LUMINANCE.toFixed(1)};
-              // Emissive color * emissiveIntensity is now expressed in cd/m² too.
-              totalEmissiveRadiance /= ${REFERENCE_LUMINANCE.toFixed(1)};
-            `);
+            .replace('#include <lights_fragment_begin>', m.isMeshToonMaterial ? TOON_LIGHTS_CHUNK : LIGHTS_CHUNK);
+          applyPhotometricUnits(shader);
         };
-        m.customProgramCacheKey = () => m.isMeshToonMaterial ? 'photometric-pcss-toon-v4' : 'photometric-pcss-lambert-v4';
+        m.customProgramCacheKey = () => `${PHOTOMETRIC_CACHE_KEY}-pcss-${m.isMeshToonMaterial ? 'toon' : 'lambert'}`;
         m.needsUpdate = true;
       }
     });

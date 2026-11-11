@@ -8,11 +8,11 @@ import { LEGACY_EV100, exposureScale } from '../src/core/lighting.js';
 
 export function sampleWorkspace() {
   return {
-    format: 'mmd-canvas-workspace', version: 1,
+    format: 'mmd-canvas-workspace', version: 2,
     browser: { directory: 'C:\\project\\models', filter: 'モデル', only3d: true },
     model: { path: 'C:\\project\\models\\캐릭터.pmx', materials: [{ name: '体', visible: false, emissiveNits: 250 }], morphs: [{ name: 'あ', weight: 0.5 }] },
     viewport: { exposure: { ev100: 2.5, compensation: 1 }, mode: 'toon', outline: { width: 2.7, color: '#ab3344' }, flags: { grid: false, skeleton: true, wireframe: false },
-      lightIntensity: 12500.5, lightUnit: 'lux', lightDirection: [1, 2, 3], shadowEnabled: true, shadowSoftness: 0.04, gizmo: true,
+      lightIntensity: 12500.5, lightUnit: 'lux', ambientIntensity: 3.5, lightDirection: [1, 2, 3], shadowEnabled: true, shadowSoftness: 0.04, gizmo: true,
       gizmoSpace: 'world', gizmoMode: 'rotate', gizmoPosition: [1, 4, 5],
       camera: { position: [2, 4, 7], target: [0, 1, 0], up: [0, 1, 0], fov: 35, zoom: 1, near: 0.1, far: 100, maxDistance: 50 } },
     conversion: { mode: 'single', format: 'usdz', output: 'C:\\project\\export\\キャラクター.usdz', source: 'C:\\project\\models\\캐릭터.pmx', scale: 8, nameMode: 'english', morphs: true, copyTextures: true, asciiNames: true, recursive: false },
@@ -44,6 +44,11 @@ export function registerWorkspaceTests(test) {
     assert.equal(migrated.viewport.lightUnit, 'lux');
     assert.equal(migrated.viewport.lightIntensity, 6);
     assert.equal(validateWorkspace(migrated).viewport.lightIntensity, 6);
+    // version 1 files stay readable, are rewritten as version 2, and had no ambient fill
+    const old = sampleWorkspace(); old.version = 1; delete old.viewport.ambientIntensity;
+    assert.equal(validateWorkspace(old).version, 2);
+    assert.equal(validateWorkspace(old).viewport.ambientIntensity, 0);
+    assert.equal(validateWorkspace(sampleWorkspace()).viewport.ambientIntensity, 3.5);
     workspace.viewport.lightUnit = 'candela';
     assert.throws(() => validateWorkspace(workspace));
     workspace.viewport.lightUnit = 'lux'; workspace.viewport.lightIntensity = 200001;

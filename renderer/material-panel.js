@@ -124,7 +124,7 @@ export class MaterialPanel {
       input.addEventListener('input', () => {
         if (!Number.isFinite(input.valueAsNumber)) return;
         this.viewer.setMaterialEmission(selected, input.valueAsNumber);
-        input.value = String(this.viewer.getMaterialEmission(selected).nits); reset.disabled = false;
+        reset.disabled = false; // the field itself is normalised on blur, not while typing
       });
       input.addEventListener('blur', () => { input.value = String(this.viewer.getMaterialEmission(selected).nits); });
       reset.addEventListener('click', () => { this.viewer.setMaterialEmission(selected, null); this.renderDetail(); });

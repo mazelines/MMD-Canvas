@@ -3,7 +3,7 @@ const $ = (id) => document.getElementById(id);
 export function captureWorkspace(viewer, state, panel) {
   const current = viewer.current, camera = viewer.camera;
   return {
-    format: 'mmd-canvas-workspace', version: 1,
+    format: 'mmd-canvas-workspace', version: 2,
     browser: { directory: state.dir, filter: $('filter-input').value, only3d: $('only-3d').checked },
     model: current ? {
       path: state.loadedPath,
@@ -14,7 +14,7 @@ export function captureWorkspace(viewer, state, panel) {
     viewport: {
       exposure: { ...viewer.exposure },
       mode: viewer.renderMode, outline: { ...viewer.outlineSettings }, flags: { ...viewer.flags },
-      lightIntensity: viewer.lightLevel, lightUnit: 'lux', lightDirection: viewer.sun.position.toArray(),
+      lightIntensity: viewer.lightLevel, lightUnit: 'lux', ambientIntensity: viewer.ambientLevel, lightDirection: viewer.sun.position.toArray(),
       shadowEnabled: viewer.shadow.enabled, shadowSoftness: viewer.shadow.softness,
       gizmo: $('flag-light-gizmo').checked, gizmoSpace: viewer.lightControls.space,
       gizmoMode: viewer.lightControls.mode, gizmoPosition: viewer.lightRig.position.toArray(),
@@ -46,6 +46,7 @@ export function restoreWorkspaceState(data, viewer, state, panel, applyRenderMod
   applyOutline(v.outline.width, v.outline.color, false);
   for (const [flag, value] of Object.entries(v.flags)) change(`flag-${flag}`, value, true);
   change('light-intensity-number', v.lightIntensity, false, 'input');
+  change('light-ambient-number', v.ambientIntensity, false, 'input');
   change('flag-shadow', v.shadowEnabled, true);
   change('shadow-softness', v.shadowSoftness / 0.12 * 100, false, 'input');
   viewer.setShadowSoftness(v.shadowSoftness); // the slider snaps to whole steps; keep the saved value exact

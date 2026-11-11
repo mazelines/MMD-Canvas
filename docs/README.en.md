@@ -10,6 +10,24 @@ A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
 
+## v0.5.0: ambient light and EV100
+
+The left viewport panel controls exposure and ambient fill independently.
+
+![EV100, exposure compensation, and ambient illuminance controls](images/ambient-ev100-controls.png)
+
+| Setting | Effect | Default / range |
+| --- | --- | --- |
+| EV100 | Increasing by 1 halves display brightness without changing light illuminance. | 0 / -10–24 |
+| Compensation | Each +1 EV doubles display brightness. | 0 / -10–10 EV |
+| Ambient | Adds sky/ground fill to faces turned away from the directional light. Set 0 to disable it. | 2 / 0–200,000 lux |
+
+The screenshot's 6 lux is an example setting. Double-click the ambient number field to restore 2 lux. The ↺ button resets only EV100 and compensation to 0 / 0. Directional illuminance remains a separate toolbar setting.
+
+Ambient light is saved locally and in `.canvas`. Older workspaces without this field restore 0 lux. New saves use workspace format 2; format 1 remains readable, but older apps cannot open the new format. Use Save As if you need to preserve an older file.
+
+Negative/decimal number entry has been improved. Background, grid, gizmo, and outline colors are compensated against exposure and tone mapping.
+
 ## What's new in v0.4.0
 
 - **Physical lighting:** directional illuminance in lux, default 10 lux, range 0–200,000. Hidden fill lights and mode-dependent intensity multipliers have been removed.
@@ -54,7 +72,7 @@ Use the **Lambert / Toon** sphere buttons at the top right of the viewport.
 | **Standard · Lambert** | Smooth lighting without Toon outlines; the default mode. | Inspecting shape, textures, and lighting |
 | **Simple Toon** | Two lighting tones and silhouette outlines. | Previewing cel shading and character silhouettes |
 
-Toon cast shadows share the unlit face's dark tone instead of darkening it again. No automatic hemisphere fill is applied. Soft PCSS shadow edges interpolate between the two tones; source texture, emission, and AO variations remain visible.
+Toon cast shadows share the unlit face's dark tone instead of darkening it again. Hemisphere fill is controlled by the ambient lux setting. Soft PCSS shadow edges interpolate between the two tones; source texture, emission, and AO variations remain visible.
 
 ![Simple Toon rendering with lux lighting, EV100 exposure, outlines, and workspace controls](images/mmd-canvas-toon-preview.png)
 

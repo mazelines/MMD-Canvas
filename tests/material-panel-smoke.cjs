@@ -59,7 +59,7 @@ const os = require('node:os');
             __viewer.setRenderMode(mode);
             for (const enabled of [false, true]) {
               __viewer.setShadows(enabled);
-              check(__viewer.sun.intensity === 10 && __viewer.hemi.intensity === 0, 'shading and shadows preserve physical light');
+              check(__viewer.sun.intensity === 10 && __viewer.hemi.intensity === __viewer.ambientLevel, 'shading and shadows preserve physical light');
             }
           }
           $('tab-materials').click();
