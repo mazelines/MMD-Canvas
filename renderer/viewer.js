@@ -328,6 +328,11 @@ export class Viewer {
       }
     });
     pos.needsUpdate = true;
+    // Morph edits change both culling bounds and the tightly fitted shadow projection.
+    // Refresh them without calling frame(), which would reset the user's camera.
+    c.object.geometry.computeBoundingBox();
+    c.object.geometry.computeBoundingSphere();
+    this.shadows.fit(new THREE.Box3().setFromObject(c.object));
     this.invalidateShadows();
     this.requestRender();
   }
