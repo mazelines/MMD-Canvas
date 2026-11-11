@@ -184,7 +184,7 @@ ipcMain.on('viewer:loaded', async (_e, info) => {
     await new Promise((r) => setTimeout(r, 300));
   }
   if (process.env.MMDCONV_BENCH) {
-    const bench = await win.webContents.executeJavaScript('JSON.stringify(window.__viewer.benchmark(30))');
+    const bench = await win.webContents.executeJavaScript('JSON.stringify([window.__viewer.benchmark(30), window.__viewer.shadows.coverage])');
     console.log('[bench]', bench);
     await new Promise((r) => setTimeout(r, 500));
   }

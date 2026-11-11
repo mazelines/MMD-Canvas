@@ -17,7 +17,8 @@ uniform mat4 shMatrix;       // world -> shadow map uv + depth
 uniform vec3 shLightDir;     // world space, towards the light
 uniform float shLightTan;    // tan( angular radius of the light )
 uniform float shRange;       // world length of the map's depth range
-uniform float shWidth;       // world width covered by the map
+uniform vec2 shSize;         // world width / height covered by the map
+uniform float shMaxRadius;   // world-space cap of the search / filter radius
 uniform float shTexel;       // 1 / map resolution
 uniform int shOn;
 varying vec3 vShWorldPos;
@@ -37,7 +38,7 @@ float sunShadow( vec3 P ) {
 	if ( dot( ng, L ) < 0.0 ) ng = - ng;
 	float ndl = clamp( dot( ng, L ), 0.05, 1.0 );
 	float slope = min( sqrt( 1.0 - ndl * ndl ) / ndl, 1.5 );
-	float texelWorld = shWidth * shTexel;
+	float texelWorld = max( shSize.x, shSize.y ) * shTexel;
 
 	vec4 sc = shMatrix * vec4( P + ng * texelWorld * 1.5, 1.0 );
 	if ( sc.x < 0.0 || sc.x > 1.0 || sc.y < 0.0 || sc.y > 1.0 ) return 1.0;
@@ -46,26 +47,26 @@ float sunShadow( vec3 P ) {
 	float phi = shNoise( gl_FragCoord.xy ) * 6.2831853;
 	// depth bias grows with the tap distance on surfaces tilted away from the light
 	float biasBase = texelWorld * 1.5 * slope / shRange + 2e-5;
-	float biasPerUv = shWidth * slope / shRange;
+	float biasPerWorld = slope / shRange;
 
 	// 1. blocker search: average depth of whatever is between this point and the light
-	float searchUv = clamp( max( zr, 0.0 ) * shRange * shLightTan / shWidth, 2.0 * shTexel, 0.05 );
+	float searchRadius = clamp( max( zr, 0.0 ) * shRange * shLightTan, 2.0 * texelWorld, shMaxRadius );
 	float blockerSum = 0.0, blockers = 0.0;
 	for ( int i = 0; i < ${BLOCKER_TAPS}; i ++ ) {
-		vec2 o = shDisk( i, ${BLOCKER_TAPS}, phi ) * searchUv;
-		float d = textureLod( shMap, sc.xy + o, 0.0 ).r;
-		if ( d < zc - biasBase - length( o ) * biasPerUv ) { blockerSum += d; blockers += 1.0; }
+		vec2 o = shDisk( i, ${BLOCKER_TAPS}, phi ) * searchRadius;
+		float d = textureLod( shMap, sc.xy + o / shSize, 0.0 ).r;
+		if ( d < zc - biasBase - length( o ) * biasPerWorld ) { blockerSum += d; blockers += 1.0; }
 	}
 	if ( blockers < 0.5 ) return 1.0;
 
 	// 2. penumbra width from the receiver-blocker distance, 3. filter with that radius
 	float penumbra = ( zr - blockerSum / blockers ) * shRange * shLightTan;
-	float filterUv = clamp( penumbra / shWidth, 1.5 * shTexel, 0.05 );
+	float filterRadius = clamp( penumbra, 1.5 * texelWorld, shMaxRadius );
 	float lit = 0.0;
 	for ( int i = 0; i < ${FILTER_TAPS}; i ++ ) {
-		vec2 o = shDisk( i, ${FILTER_TAPS}, phi + 1.7 ) * filterUv;
-		float d = textureLod( shMap, sc.xy + o, 0.0 ).r;
-		lit += d < zc - biasBase - length( o ) * biasPerUv ? 0.0 : 1.0;
+		vec2 o = shDisk( i, ${FILTER_TAPS}, phi + 1.7 ) * filterRadius;
+		float d = textureLod( shMap, sc.xy + o / shSize, 0.0 ).r;
+		lit += d < zc - biasBase - length( o ) * biasPerWorld ? 0.0 : 1.0;
 	}
 	return lit / float( ${FILTER_TAPS} );
 }
@@ -102,6 +103,7 @@ export class SoftShadows {
     this.target.depthTexture.minFilter = this.target.depthTexture.magFilter = THREE.NearestFilter;
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
     this.center = new THREE.Vector3();
+    this.box = new THREE.Box3();
     this.radius = 1;
     this.lightDir = new THREE.Vector3(0, 1, 0);
     this.uniforms = {
@@ -110,7 +112,8 @@ export class SoftShadows {
       shLightDir: { value: this.lightDir },
       shLightTan: { value: 0.03 },
       shRange: { value: 1 },
-      shWidth: { value: 1 },
+      shSize: { value: new THREE.Vector2(1, 1) },
+      shMaxRadius: { value: 0.1 },
       shTexel: { value: 1 / MAP_SIZE },
       shOn: { value: 0 },
     };
@@ -186,6 +189,7 @@ export class SoftShadows {
   fit(box) {
     const size = box.getSize(new THREE.Vector3());
     box.getCenter(this.center);
+    this.box.copy(box);
     this.radius = Math.max(size.length() / 2, 1e-4) * 1.06;
     const reach = Math.max(size.x, size.y, size.z) * 3;
     this.ground.position.set(this.center.x, box.min.y, this.center.z);
@@ -228,20 +232,34 @@ export class SoftShadows {
 
   /** Render the model's depth from the light. Call when the model or the light changed. */
   renderMap(object) {
+    // Fit the map to the model as seen from the light (its bounding box in light space), not to a
+    // bounding sphere: a tall, narrow model then uses the whole map instead of a strip of it.
     const r = this.radius, cam = this.camera, L = this.lightDir;
-    cam.left = -r; cam.right = r; cam.top = r; cam.bottom = -r;
-    cam.near = r * 0.4; cam.far = r * 2.6;
     cam.up.set(0, 1, 0);
     if (Math.abs(L.y) > 0.99) cam.up.set(0, 0, 1);
-    cam.position.copy(this.center).addScaledVector(L, r * 1.5);
+    cam.position.copy(this.center).addScaledVector(L, r * 2);
     cam.lookAt(this.center);
-    cam.updateProjectionMatrix();
     cam.updateMatrixWorld(true);
+    const lo = new THREE.Vector3(Infinity, Infinity, Infinity), hi = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+    const corner = new THREE.Vector3();
+    const b = this.box;
+    for (let i = 0; i < 8; i++) {
+      corner.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).applyMatrix4(cam.matrixWorldInverse);
+      lo.min(corner); hi.max(corner);
+    }
+    // margin: morphs may push vertices slightly past the measured bounds
+    const padX = (hi.x - lo.x) * 0.03 + r * 0.01, padY = (hi.y - lo.y) * 0.03 + r * 0.01, padZ = r * 0.05;
+    cam.left = lo.x - padX; cam.right = hi.x + padX;
+    cam.bottom = lo.y - padY; cam.top = hi.y + padY;
+    cam.near = Math.max(-hi.z - padZ, r * 0.01); cam.far = -lo.z + padZ;
+    cam.updateProjectionMatrix();
     this.uniforms.shMatrix.value
       .set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1)
       .multiply(cam.projectionMatrix).multiply(cam.matrixWorldInverse);
     this.uniforms.shRange.value = cam.far - cam.near;
-    this.uniforms.shWidth.value = r * 2;
+    this.uniforms.shSize.value.set(cam.right - cam.left, cam.top - cam.bottom);
+    this.uniforms.shMaxRadius.value = r * 0.1;
+    this.coverage = { width: cam.right - cam.left, height: cam.top - cam.bottom, sphere: r * 2 };
 
     // swap in depth materials, hide non-mesh helpers of the model (points, lines)
     const swapped = [], hidden = [];

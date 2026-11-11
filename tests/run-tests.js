@@ -13,6 +13,7 @@ import { buildScene } from '../src/core/scene.js';
 import { convertPmxFile } from '../src/core/convert.js';
 import { translateName, uniquify, usdIdentifier } from '../src/core/names.js';
 import { textureUsesAlpha } from '../src/core/texture-alpha.js';
+import { registerShadowTests } from './shadow-tests.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sampleDir = path.join(here, 'sample');
@@ -257,6 +258,7 @@ test('options: no morphs, scale, missing texture, bad input', async () => {
 });
 
 // ---------------------------------------------------------------- run
+registerShadowTests(test);
 for (const run of pending) await run();
 
 if (process.argv.includes('--blender')) {
