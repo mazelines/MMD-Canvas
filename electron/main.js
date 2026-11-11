@@ -79,6 +79,7 @@ handle('app:startup', async () => ({
   openFile: OPEN_AT_START ? path.resolve(OPEN_AT_START) : null,
   formats: OUTPUT_FORMATS,
   testShadow: process.env.MMDCONV_SHADOW || null,
+  testGizmo: process.env.MMDCONV_GIZMO || null,
   testConvert: process.env.MMDCONV_TEST_CONVERT ? { output: process.env.MMDCONV_TEST_CONVERT, format: path.extname(process.env.MMDCONV_TEST_CONVERT).slice(1).toLowerCase() } : null,
 }));
 
@@ -176,6 +177,17 @@ ipcMain.on('viewer:loaded', async (_e, info) => {
   await new Promise((r) => setTimeout(r, Number(process.env.MMDCONV_SHOT_DELAY || 1500)));
   const dom = await win.webContents.executeJavaScript("document.getElementById('convert-result').hidden ? '' : document.getElementById('convert-result').innerText");
   if (dom) console.log('[convert-result]', dom);
+  if (process.env.MMDCONV_KEYS) { // e.g. "KeyW": send key presses to the page before the screenshot
+    for (const code of process.env.MMDCONV_KEYS.split(',')) {
+      await win.webContents.executeJavaScript(`window.dispatchEvent(new KeyboardEvent('keydown', { code: ${JSON.stringify(code)} })); window.__viewer.lightControls.mode + "/" + window.__viewer.lightControls.space`).then((m) => console.log('[key]', code, '->', m));
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  if (process.env.MMDCONV_BENCH) {
+    const bench = await win.webContents.executeJavaScript('JSON.stringify(window.__viewer.benchmark(30))');
+    console.log('[bench]', bench);
+    await new Promise((r) => setTimeout(r, 500));
+  }
   const image = await win.webContents.capturePage();
   await fs.writeFile(SHOT_PATH, image.toPNG());
   console.log('[shot]', SHOT_PATH);

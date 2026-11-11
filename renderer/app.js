@@ -256,31 +256,57 @@ for (const flag of ['grid', 'skeleton', 'wireframe']) {
   apply(false);
 }
 {
-  // ray traced shadows: toggle + softness (0..100 -> tan of the light's angular radius)
+  // soft shadows: toggle + softness (0..100 -> tan of the light's angular radius)
   const toggle = $('flag-shadow'), soft = $('shadow-softness');
   const apply = (save) => {
     viewer.setShadowSoftness((Number(soft.value) / 100) * 0.12);
     viewer.setShadows(toggle.checked);
     soft.disabled = !toggle.checked;
-    if (save) localStorage.setItem('rtShadow', JSON.stringify({ on: toggle.checked, softness: Number(soft.value) }));
+    if (save) localStorage.setItem('shadow', JSON.stringify({ on: toggle.checked, softness: Number(soft.value) }));
   };
   try {
-    const p = JSON.parse(localStorage.getItem('rtShadow') || '{}');
+    const p = JSON.parse(localStorage.getItem('shadow') || '{}');
     if (typeof p.on === 'boolean') toggle.checked = p.on;
     if (Number.isFinite(p.softness)) soft.value = String(p.softness);
   } catch { /* ignore broken prefs */ }
   toggle.addEventListener('change', () => apply(true));
   soft.addEventListener('input', () => apply(true));
   soft.addEventListener('dblclick', () => { soft.value = '25'; apply(true); });
-  viewer.onShadowStats = (st) => { if (st) console.log(`[rt-shadow] ${JSON.stringify(st)}`); };
   window.__setShadowTest = (on, softness) => { toggle.checked = on; if (softness != null) soft.value = String(softness); apply(false); };
   apply(false);
 }
+{
+  // light direction: viewport gizmo + persisted direction
+  const gizmo = $('flag-light-gizmo');
+  try {
+    const d = JSON.parse(localStorage.getItem('lightDir') || 'null');
+    if (Array.isArray(d) && d.length === 3) viewer.setLightDirection(d);
+  } catch { /* ignore broken prefs */ }
+  viewer.onLightDirection = (d) => localStorage.setItem('lightDir', JSON.stringify(d));
+  gizmo.addEventListener('change', () => viewer.setLightGizmo(gizmo.checked));
+  $('btn-light-reset').addEventListener('click', () => viewer.resetLightDirection());
+  const spaceBtn = $('btn-light-space');
+  const setSpace = (space) => {
+    viewer.setLightGizmoSpace(space);
+    spaceBtn.textContent = space === 'world' ? 'World' : 'Local';
+    localStorage.setItem('lightGizmoSpace', space);
+  };
+  spaceBtn.addEventListener('click', () => setSpace(viewer.lightControls.space === 'world' ? 'local' : 'world'));
+  setSpace(localStorage.getItem('lightGizmoSpace') === 'world' ? 'world' : 'local');
+  window.__viewer = viewer;
+  window.__setGizmoTest = (dir) => { gizmo.checked = true; viewer.setLightGizmo(true); if (dir) viewer.setLightDirection(dir); };
+}
 window.addEventListener('keydown', (ev) => {
-  const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName || '');
-  if (ev.ctrlKey && ev.key.toLowerCase() === 'o') { ev.preventDefault(); $('btn-open').click(); }
-  else if (ev.ctrlKey && ev.key.toLowerCase() === 'e') { ev.preventDefault(); if (!$('btn-convert').disabled) $('btn-convert').click(); }
-  else if (!typing && !ev.ctrlKey && ev.key.toLowerCase() === 'f' && !$('convert-dialog').open) viewer.frame();
+  // checkboxes / sliders keep focus after a click but are not text entry; ev.code works with a Korean IME too
+  const el = document.activeElement;
+  const typing = !!el && (/^(SELECT|TEXTAREA)$/.test(el.tagName) || (el.tagName === 'INPUT' && !/^(checkbox|range|button)$/.test(el.type)));
+  const plain = !typing && !ev.ctrlKey && !ev.altKey && !ev.metaKey && !$('convert-dialog').open;
+  if (ev.ctrlKey && ev.code === 'KeyO') { ev.preventDefault(); $('btn-open').click(); }
+  else if (ev.ctrlKey && ev.code === 'KeyE') { ev.preventDefault(); if (!$('btn-convert').disabled) $('btn-convert').click(); }
+  else if (plain && ev.code === 'KeyF') viewer.frame();
+  else if (plain && ev.code === 'KeyW' && $('flag-light-gizmo').checked) viewer.setLightGizmoMode('translate');
+  else if (plain && ev.code === 'KeyE' && $('flag-light-gizmo').checked) viewer.setLightGizmoMode('rotate');
+  else if (plain && ev.code === 'KeyX' && $('flag-light-gizmo').checked) $('btn-light-space').click();
 });
 
 // drag & drop
@@ -441,7 +467,8 @@ $('btn-run').addEventListener('click', async () => {
     b.addEventListener('click', () => navigate(d));
     return b;
   }));
-  if (start.testShadow) window.__setShadowTest(true, Number(start.testShadow));
+  if (start.testShadow) window.__setShadowTest(start.testShadow !== 'off', start.testShadow === 'off' ? null : Number(start.testShadow));
+  if (start.testGizmo) window.__setGizmoTest(start.testGizmo === '1' ? null : start.testGizmo.split(',').map(Number));
   if (start.openFile) {
     await openPath(start.openFile);
     if (start.testConvert && state.loadedInfo?.kind === 'pmx') { // automated UI test hook

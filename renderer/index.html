@@ -9,8 +9,7 @@
     {
       "imports": {
         "three": "../node_modules/three/build/three.module.js",
-        "three/addons/": "../node_modules/three/examples/jsm/",
-        "three-mesh-bvh": "../node_modules/three-mesh-bvh/src/index.js"
+        "three/addons/": "../node_modules/three/examples/jsm/"
       }
     }
   </script>
@@ -27,10 +26,13 @@
       <input type="range" id="light-intensity" min="0" max="3" step="0.05" value="1">
       <span id="light-value">100%</span>
     </label>
-    <label class="toggle" title="레이트레이싱 소프트 섀도 (정지하면 점점 깨끗해집니다)"><input type="checkbox" id="flag-shadow">RT 그림자</label>
+    <label class="toggle" title="PCSS 소프트 섀도 — 접촉부는 선명하고 멀어질수록 부드러워집니다"><input type="checkbox" id="flag-shadow" checked>그림자</label>
     <label class="slider" title="그림자 부드러움 — 광원 크기 (더블클릭: 기본값)">부드러움
       <input type="range" id="shadow-softness" min="0" max="100" step="1" value="25">
     </label>
+    <label class="toggle" title="뷰포트에 광원 기즈모를 표시합니다. W: 이동, E: 회전(광원 방향), X: Local / World"><input type="checkbox" id="flag-light-gizmo">광원 기즈모</label>
+    <button id="btn-light-space" title="기즈모 좌표계 전환: Local / World (X)">Local</button>
+    <button id="btn-light-reset" title="광원 방향을 기본값으로">↺</button>
     <div class="sep"></div>
     <label class="toggle"><input type="checkbox" id="flag-grid" checked>그리드</label>
     <label class="toggle"><input type="checkbox" id="flag-skeleton">본</label>

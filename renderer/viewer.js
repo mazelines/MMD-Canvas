@@ -2,12 +2,13 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
 import { parsePmx } from '../src/core/pmx-parser.js';
 import { buildScene } from '../src/core/scene.js';
-import { RtShadows, Accumulator } from './rt-shadows.js';
+import { SoftShadows } from './shadows.js';
 
 export const VIEWABLE = ['.pmx', '.fbx', '.glb', '.gltf', '.obj', '.stl', '.ply', '.dae', '.3mf', '.usdz', '.usda', '.usd', '.usdc'];
 
@@ -55,13 +56,28 @@ export class Viewer {
     this.loadToken = 0;
     this.needsRender = true;
 
-    // ray traced soft shadows (off by default)
-    this.rt = new RtShadows();
-    this.accumulator = new Accumulator(this.renderer);
-    this.scene.add(this.rt.ground);
-    this.shadow = { enabled: false, softness: 0.03, dirty: false, dirtyAt: 0 };
+    // PCSS soft shadows for the sun
+    this.shadows = new SoftShadows(this.renderer);
+    this.scene.add(this.shadows.ground);
+    this.shadow = { enabled: false, softness: 0.03, dirty: false };
     this.lightLevel = 1;
-    this.onShadowStats = null;
+
+    // light direction gizmo: a sun icon + rotate handles, like a directional light in an engine editor
+    this.lightRig = makeSunIcon();
+    this.lightRig.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), this.sun.position.clone().normalize());
+    this.scene.add(this.lightRig);
+    this.lightControls = new TransformControls(this.camera, this.renderer.domElement);
+    this.lightControls.setMode('rotate');
+    this.lightControls.setSpace('local');
+    this.lightControls.setSize(0.75);
+    this.lightControls.attach(this.lightRig);
+    this.lightGizmo = this.lightControls.getHelper();
+    this.scene.add(this.lightGizmo);
+    this.lightControls.addEventListener('dragging-changed', (ev) => { this.controls.enabled = !ev.value; });
+    this.lightControls.addEventListener('change', () => this.requestRender());
+    this.lightControls.addEventListener('objectChange', () => this.syncLightFromRig(true));
+    this.onLightDirection = null;
+    this.setLightGizmo(false);
 
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
@@ -69,13 +85,9 @@ export class Viewer {
       requestAnimationFrame(tick);
       const changed = this.controls.update() || this.needsRender;
       this.needsRender = false;
-      if (this.shadow.enabled && this.current) {
-        if (this.shadow.dirty && performance.now() >= this.shadow.dirtyAt) this.rebuildShadows();
-        if (changed) this.accumulator.reset();
-        if (!this.accumulator.done) this.accumulator.render(this.scene, this.camera, this.rt.uniforms.rtSeed);
-      } else if (changed) {
-        this.renderer.render(this.scene, this.camera);
-      }
+      if (!changed) return;
+      if (this.shadow.enabled && this.current && this.shadow.dirty) this.updateShadowMap();
+      this.renderer.render(this.scene, this.camera);
     };
     tick();
   }
@@ -85,7 +97,7 @@ export class Viewer {
   /** Overall light level; 1 = default. Scales all three light sources together. */
   setLightIntensity(k) {
     this.lightLevel = k;
-    // with traced shadows the sun carries more of the light, so the shadows actually read
+    // with shadows on, the sun carries more of the light so the shadows actually read
     const traced = this.shadow.enabled;
     this.hemi.intensity = (traced ? 1.3 : 2.2) * k;
     this.sun.intensity = (traced ? 1.8 : 0.9) * k;
@@ -93,35 +105,86 @@ export class Viewer {
     this.requestRender();
   }
 
-  // ---------- ray traced shadows ----------
+  // ---------- light direction ----------
+  /** @param {number[]|THREE.Vector3} dir world-space direction towards the light */
+  setLightDirection(dir, notify = false) {
+    const d = (Array.isArray(dir) ? new THREE.Vector3(...dir) : dir.clone()).normalize();
+    if (!Number.isFinite(d.x + d.y + d.z) || d.lengthSq() < 0.5) return;
+    this.lightRig.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), d);
+    this.syncLightFromRig(notify);
+  }
+
+  resetLightDirection() { this.setLightDirection([-0.4, 1, 0.8], true); }
+
+  syncLightFromRig(notify) {
+    const d = new THREE.Vector3(0, 0, 1).applyQuaternion(this.lightRig.quaternion).normalize();
+    this.sun.position.copy(d);
+    this.shadows.setLight(d, this.shadow.softness);
+    this.shadow.dirty = true;
+    if (notify) this.onLightDirection?.(d.toArray());
+    this.requestRender();
+  }
+
+  /** @param {'translate'|'rotate'} mode move the light icon, or turn the light */
+  setLightGizmoMode(mode) {
+    this.lightControls.setMode(mode);
+    this.requestRender();
+  }
+
+  /** @param {'local'|'world'} space axes of the gizmo handles */
+  setLightGizmoSpace(space) {
+    this.lightControls.setSpace(space);
+    this.requestRender();
+  }
+
+  setLightGizmo(visible) {
+    this.lightRig.visible = visible;
+    this.lightGizmo.visible = visible;
+    this.lightControls.enabled = visible;
+    this.requestRender();
+  }
+
+  /** Average milliseconds per frame, shadow map included (forces the GPU to finish each one). */
+  benchmark(frames = 20) {
+    const gl = this.renderer.getContext();
+    const px = new Uint8Array(4);
+    const run = () => {
+      if (this.shadow.enabled && this.current) this.updateShadowMap();
+      this.renderer.render(this.scene, this.camera);
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    };
+    run(); run();
+    const t = performance.now();
+    for (let i = 0; i < frames; i++) run();
+    const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    return { msPerFrame: +((performance.now() - t) / frames).toFixed(2), width: size.x, height: size.y, lost: gl.isContextLost() };
+  }
+
+  // ---------- shadows ----------
   setShadows(enabled) {
     this.shadow.enabled = enabled;
-    if (enabled && this.current && !this.rt.ready) { this.shadow.dirty = true; this.shadow.dirtyAt = 0; }
-    this.rt.setEnabled(enabled);
+    this.shadow.dirty = true;
+    this.shadows.setEnabled(enabled);
     this.setLightIntensity(this.lightLevel);
   }
 
   /** @param {number} radius tan of the light's angular radius (0 = hard shadows) */
   setShadowSoftness(radius) {
     this.shadow.softness = radius;
-    this.rt.setLight(this.sun.position, radius);
+    this.shadows.setLight(this.sun.position, radius);
     this.requestRender();
   }
 
-  /** The shadow BVH no longer matches the model (morph, material visibility, late texture). */
-  invalidateShadows(delay = 200) {
+  /** The shadow map no longer matches the model (morph, material visibility, late texture, light). */
+  invalidateShadows() {
     this.shadow.dirty = true;
-    this.shadow.dirtyAt = performance.now() + delay;
+    this.requestRender();
   }
 
-  rebuildShadows() {
+  updateShadowMap() {
     this.shadow.dirty = false;
-    if (!this.current) return;
-    this.rt.setLight(this.sun.position, this.shadow.softness);
-    this.rt.build(this.current.object);
-    this.rt.setEnabled(this.shadow.enabled);
-    this.onShadowStats?.(this.rt.stats);
-    this.requestRender();
+    this.shadows.setLight(this.sun.position, this.shadow.softness);
+    this.shadows.renderMap(this.current.object);
   }
 
   resize() {
@@ -135,7 +198,7 @@ export class Viewer {
   clear() {
     if (this.skeleton) { this.scene.remove(this.skeleton); disposeObject(this.skeleton); this.skeleton = null; }
     if (this.current) { this.root.remove(this.current.object); disposeObject(this.current.object); this.current = null; }
-    this.rt.clear();
+    this.shadows.clear();
     this.shadow.dirty = false;
     this.requestRender();
   }
@@ -151,10 +214,10 @@ export class Viewer {
     this.clear();
     this.current = loaded;
     this.root.add(loaded.object);
-    this.rt.patch(loaded.object);
+    this.shadows.patch(loaded.object);
     this.applyFlags();
     this.frame();
-    this.invalidateShadows(0);
+    this.invalidateShadows();
     const info = { ...loaded.info, ...countGeometry(loaded.object) };
     loaded.info = info;
     return info;
@@ -273,7 +336,7 @@ export class Viewer {
     const c = this.current;
     if (!c || c.kind !== 'pmx') return;
     c.object.material[index].visible = visible;
-    this.invalidateShadows(0);
+    this.invalidateShadows();
     this.requestRender();
   }
 
@@ -394,7 +457,10 @@ export class Viewer {
     this.grid.position.set(Math.round(center.x / step) * step, box.min.y, Math.round(center.z / step) * step);
     this.grid.visible = this.flags.grid;
     this.scene.add(this.grid);
-    this.rt.fitGround(box);
+    this.shadows.fit(box);
+    this.shadow.dirty = true;
+    this.lightRig.position.set(box.min.x - radius * 0.25, box.max.y, center.z);
+    this.lightRig.scale.setScalar(radius * 0.09);
     this.buildSkeleton(radius);
     this.requestRender();
   }
@@ -455,6 +521,26 @@ export class Viewer {
     this.scene.background = new THREE.Color(hex);
     this.requestRender();
   }
+}
+
+/** Directional light icon: a disc with parallel rays along local -Z (the way the light travels). */
+function makeSunIcon() {
+  const pts = [];
+  const N = 32;
+  for (let i = 0; i < N; i++) {
+    const a = (i / N) * Math.PI * 2, b = ((i + 1) / N) * Math.PI * 2;
+    pts.push(Math.cos(a), Math.sin(a), 0, Math.cos(b), Math.sin(b), 0);
+  }
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    pts.push(Math.cos(a), Math.sin(a), 0, Math.cos(a), Math.sin(a), -3);
+  }
+  pts.push(0, 0, 0, 0, 0, -4.5);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  const icon = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xffd24f, depthTest: false, transparent: true }));
+  icon.renderOrder = 998;
+  return icon;
 }
 
 function countGeometry(object) {

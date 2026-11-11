@@ -1,53 +1,134 @@
-# MMD Converter
+# MMD Canvas
 
-PMX(MMD) 모델을 **FBX / USD**로 변환하는 기능을 갖춘 3D 파일 뷰어 · 브라우저 · 컨버터.
+PMX(MMD) 모델을 미리 보고 **FBX / USD로 변환**하는 데스크톱 앱입니다. 폴더 탐색, 3D 뷰어, 단일·일괄 변환을 한 화면에서 제공합니다. 앱 내부와 CLI에서는 `MMD Converter`라는 이름도 사용합니다.
+
+![MMD Canvas에서 PMX 모델과 소프트 그림자, 재질과 모프 정보를 표시한 실행 화면](docs/images/mmd-canvas-preview.png)
+
+> 현재 개발 버전의 실행 화면입니다. 예시 모델 파일은 저장소에 포함하지 않습니다. 아래 기능 설명은 `main` 기준이며 기존 릴리스와 차이가 있을 수 있습니다.
+
+[배포 파일 다운로드](https://github.com/mazelines/MMD-Canvas/releases) · [CI 실행 결과](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [릴리스 가이드](docs/releases.md)
+
+## 현재 구현된 기능
+
+- **파일 브라우저:** 드라이브·폴더 탐색, 파일명 필터, 3D 파일만 표시, 키보드 탐색, 드래그 앤 드롭.
+- **3D 뷰어:** 카메라 회전·이동·확대, 모델에 맞춰 보기, 그리드·본·와이어프레임 표시, 재질별 표시 전환.
+- **PMX 검사:** 정점·삼각형·재질·본·모프·텍스처 정보, 모델 설명과 변환 경고, 정점 모프 슬라이더와 초기화.
+- **조명과 그림자:** 조명 세기, PCSS 소프트 그림자, 광원 크기에 따른 부드러움 조절. 모델에 맞춘 4096 × 4096 섀도 맵을 사용하며 모델·재질·광원이 바뀔 때 갱신합니다.
+- **광원 기즈모:** 광원 이동·회전, Local/World 좌표계 전환, 방향 초기화. 조명 세기·그림자 설정·광원 방향·좌표계 설정을 저장합니다.
+- **변환:** PMX 단일 파일 또는 폴더 일괄 변환, 하위 폴더 포함, 스케일·이름·모프·텍스처 복사 옵션, 결과 폴더 열기.
+
+## 지원 형식
+
+| 용도 | 형식 |
+| --- | --- |
+| 뷰어 입력 | PMX, FBX, glTF/GLB, OBJ, STL, PLY, DAE, 3MF, USD/USDA/USDC/USDZ |
+| 변환 입력 | PMX |
+| 변환 출력 | FBX binary 7.4, USDA 텍스트, USDZ 패키지 |
+
+일반 3D 형식은 three.js 로더를 사용하므로 파일별 확장 기능이나 재질 표현에는 차이가 있을 수 있습니다. `.usd`로 출력하면 USDA 텍스트가 저장되며, USDC 바이너리 출력은 구현되어 있지 않습니다.
 
 ## 실행
 
+소스에서 실행하려면 **Node.js 24 이상과 npm**이 필요합니다.
+
 ```bash
-npm install
-npm start                 # 뷰어 / 브라우저 / 변환 GUI
-npm start -- model.pmx    # 파일을 지정해 바로 열기
-npm test                  # 코어 테스트 (node tests/run-tests.js --blender 로 Blender 임포트 검증 추가)
+npm ci
+npm start
+npm start -- model.pmx    # 지정한 모델을 바로 열기
 ```
+
+배포 파일은 Windows x64 설치 프로그램, macOS Apple Silicon/Intel ZIP, Linux x64 AppImage로 제공합니다. 현재 배포물은 인증서 없는 빌드이며 앱 내 자동 업데이트는 포함하지 않습니다.
+
+## 뷰어 조작
+
+| 조작 | 기능 |
+| --- | --- |
+| 마우스 왼쪽 드래그 / 오른쪽 드래그 / 휠 | 카메라 회전 / 이동 / 확대·축소 |
+| 파일 목록에서 ↑ / ↓ | 파일 선택 및 미리보기 |
+| Enter / Backspace | 폴더 진입 / 상위 폴더 |
+| F | 모델에 맞춰 보기 |
+| Ctrl+O / Ctrl+E | 파일 열기 / PMX 변환 |
+| W / E | 광원 기즈모 이동 / 회전 모드 |
+| X 또는 Local/World 버튼 | 광원 기즈모 좌표계 전환 |
+| ↺ 버튼 | 광원 방향 초기화 |
+| 조명·부드러움 슬라이더 더블클릭 | 해당 값 초기화 |
+| F12 | 개발자 도구 |
+
+광원 조작 단축키는 **광원 기즈모**를 켠 상태에서 사용합니다. 텍스트 입력 중이거나 변환 대화상자가 열려 있으면 일반 뷰어 단축키가 동작하지 않습니다.
 
 ## 명령줄 변환
 
 ```bash
-node cli.js model.pmx                      # model.fbx
-node cli.js model.pmx -o out/model.usda    # 확장자로 형식 결정 (.fbx / .usda / .usd / .usdz)
-node cli.js models/ -o out/ -f usdz -r     # 폴더 일괄 변환 (하위 폴더 포함)
-node cli.js model.pmx -n english -s 8      # 영어 이름, 스케일 8 (기본)
-node cli.js info model.pmx                 # 모델 정보
+node cli.js model.pmx                                  # model.fbx
+node cli.js model.pmx -o out/model.usda                 # 출력 확장자로 형식 결정
+node cli.js models/ -o out/ -f usdz -r                  # 하위 폴더까지 일괄 변환
+node cli.js model.pmx -n english -s 8                  # 영어 이름과 스케일 지정
+node cli.js model.pmx -o out/model.usdz --ascii         # USD prim 이름을 ASCII로 제한
+node cli.js model.pmx --no-morphs --no-copy-textures    # 모프 제외, 원본 텍스처 경로 참조
+node cli.js info model.pmx                             # 모델 정보 출력
+node cli.js --help
 ```
 
-## 변환 내용
+## 변환 범위와 제한
 
-| 항목 | FBX (binary 7.4) | USD (.usda / .usdz) |
+| 항목 | FBX | USDA / USDZ |
 | --- | --- | --- |
-| 메시 · 노멀 · UV | ✔ | ✔ |
-| 재질 · 디퓨즈 텍스처 | ✔ (phong) | ✔ (UsdPreviewSurface, GeomSubset) |
-| 본 · 스킨 가중치 | ✔ (Skin / Cluster / BindPose) | ✔ (UsdSkel) |
-| 정점 모프 (+ 정점 모프로만 된 그룹 모프) | ✔ (BlendShape) | ✔ (BlendShape) |
-| 물리 · IK · 본/UV/재질 모프 · 스피어/툰 | ✘ | ✘ |
+| 메시 · 노멀 · UV | 지원 | 지원 |
+| 재질 · 디퓨즈 텍스처 | Phong | UsdPreviewSurface, GeomSubset |
+| 본 · 스킨 가중치 | Skin / Cluster / BindPose | UsdSkel |
+| 정점 모프 · 정점 모프로만 구성된 그룹 모프 | BlendShape | BlendShape |
+| 물리 · IK · 본/UV/재질 모프 · 스피어/툰 | 미지원 | 미지원 |
 
-- 좌표계: 왼손 → 오른손 Y-up (Z 반전, 면 방향 반전), UV V 반전.
-- 스케일: 기본 8 (1 MMD 단위 = 8cm, 출력 단위 cm).
-- SDEF / QDEF 정점은 선형 스키닝(BDEF2 / BDEF4)으로 변환.
-- 텍스처는 `<출력이름>_textures/` 로 복사 (USDZ는 패키지에 포함). 실제로 투명 픽셀이 있는 텍스처만 알파 재질로 연결.
-- PMD(구버전)는 지원하지 않음 — PMX Editor에서 PMX로 저장 후 사용.
+- 좌표계는 왼손에서 오른손 Y-up으로 변환하며 Z축·면 방향·UV V를 반전합니다.
+- 기본 스케일은 8입니다. MMD 1단위를 8cm로 처리하며 출력 단위는 cm입니다.
+- 이름은 원본을 유지하는 것이 기본이며 영어 모드에서 표준 본 이름을 자동 번역합니다.
+- SDEF / QDEF 정점은 선형 스키닝(BDEF2 / BDEF4)으로 변환합니다.
+- 텍스처는 `<출력이름>_textures/`로 복사하고 USDZ에서는 패키지에 포함합니다. 텍스처의 실제 알파 사용 여부를 판별합니다.
+- PMD 입력은 지원하지 않습니다. PMX로 변환한 뒤 사용하세요.
 
-## 뷰어
+## 검증과 빌드
 
-PMX · FBX · glTF/GLB · OBJ · STL · PLY · DAE · 3MF · USD(usdz/usda/usdc) 표시.
-파일 목록에서 ↑/↓ 로 연속 미리보기, Enter 폴더 진입, Backspace 상위 폴더, F 맞춰 보기, Ctrl+O 열기, Ctrl+E 변환, F12 개발자 도구.
-
-## 구조
-
+```bash
+npm test                            # 파서·씬·FBX·USD·변환 옵션 코어 테스트
+node tests/run-tests.js --blender    # Blender를 설치한 경우 추가 임포트 검증
+node tests/make-heavy.js             # 그림자 성능 확인용 고밀도 OBJ 생성
+npm run pack                        # 실행 가능한 앱 폴더 생성
+npm run dist                        # 현재 OS 배포 파일 생성
 ```
-src/core/   pmx-parser · scene(정규화) · fbx-writer · usd-writer · convert(파일 파이프라인)
-electron/   메인 프로세스, preload
-renderer/   UI, three.js 뷰어
-cli.js      명령줄 변환기
-tests/      합성 PMX 생성기 + 테스트
+
+테스트 입력과 출력은 `tests/sample/`, `tests/out/`에 생성되며 Git에서 제외합니다. Blender 실행 파일은 `BLENDER` 환경변수로 지정하거나 `PATH`에 등록할 수 있습니다. 배포 빌드는 `dist/`에 저장됩니다.
+
+## CI/CD
+
+- `main` push 및 PR에서 Windows·macOS·Linux 코어 테스트, Python 문법 검사, 앱 패키징을 검증합니다.
+- `v*` 태그를 push하면 버전 검사와 테스트 후 4개 플랫폼·아키텍처 배포 파일을 빌드합니다. 모두 성공하면 GitHub Release에 파일과 SHA-256 체크섬을 등록합니다.
+- Actions의 **Release → Run workflow**에서 브랜치를 선택하면 릴리스를 게시하지 않고 빌드 결과를 받을 수 있습니다.
+- Dependabot이 npm 의존성과 GitHub Actions 업데이트를 매주 확인합니다.
+
+변경 사항을 커밋한 깨끗한 `main`에서 다음 버전을 배포합니다.
+
+```bash
+npm version patch
+git push origin main --follow-tags
 ```
+
+자세한 절차와 서명 관련 설정은 [릴리스 가이드](docs/releases.md)를 참고하세요.
+
+## 구현 구조
+
+JavaScript(ES modules), Electron, three.js, HTML/CSS를 사용합니다. Blender 임포트 검증은 Python으로 작성되어 있습니다.
+
+```text
+src/core/             PMX 파서, 씬 정규화, FBX/USD 출력, 변환 파이프라인
+electron/             메인 프로세스, preload, 파일 접근과 IPC
+renderer/             파일 브라우저, 뷰어, PCSS 그림자(shadows.js), 광원 기즈모
+cli.js                명령줄 변환기
+tests/                합성 PMX·고밀도 OBJ 생성기, 코어 테스트, Blender 검증
+.github/workflows/    CI와 릴리스 자동화
+electron-builder.yml  운영체제별 패키징 설정
+docs/                 실행 화면과 릴리스 가이드
+```
+
+## 라이선스
+
+코드는 [MIT License](LICENSE)를 따릅니다. 사용자가 불러오는 모델과 텍스처에는 각 제작자의 이용 조건이 적용됩니다.

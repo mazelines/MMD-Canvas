@@ -21,8 +21,7 @@
     "url": "https://github.com/mazelines/MMD-Canvas.git"
   },
   "dependencies": {
-    "three": "^0.187.0",
-    "three-mesh-bvh": "^0.9.18"
+    "three": "^0.187.0"
   },
   "devDependencies": {
     "electron": "45.3.0",
