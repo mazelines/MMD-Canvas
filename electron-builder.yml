@@ -4,6 +4,7 @@ directories:
   output: dist
 artifactName: MMD-Canvas-${version}-${os}-${arch}.${ext}
 asar: true
+afterPack: ./tests/verify-package.cjs
 fileAssociations:
   - ext: canvas
     name: MMD Canvas Workspace
@@ -18,6 +19,12 @@ files:
   - package.json
   - LICENSE
   - licenses/**/*
+  # These are runtime modules, despite Three.js placing them under "examples".
+  # An explicit FileSet bypasses the dependency copier's examples exclusion.
+  - from: node_modules/three/examples/jsm
+    to: node_modules/three/examples/jsm
+    filter:
+      - '**/*'
 win:
   target: nsis
 nsis:

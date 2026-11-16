@@ -33,3 +33,8 @@ jobs:
         run: npm run pack
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Test packaged file opening
+        if: runner.os == 'Windows'
+        run: npm run test:open
+        env:
+          MMDCONV_APP_ROOT: dist/win-unpacked/resources/app.asar
