@@ -25,6 +25,11 @@ files:
     to: node_modules/three/examples/jsm
     filter:
       - '**/*'
+# Sample workspace opened on the first launch. Kept outside app.asar, next to the executable
+# (Contents/Example on macOS), so the model and its textures stay ordinary files.
+extraFiles:
+  - from: Example
+    to: Example
 win:
   target: nsis
 nsis:

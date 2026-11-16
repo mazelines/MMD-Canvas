@@ -1,0 +1,346 @@
+{
+  "format": "mmd-canvas-workspace",
+  "version": 2,
+  "browser": {
+    "directory": ".",
+    "filter": "",
+    "only3d": true
+  },
+  "model": {
+    "path": "Zhuang Fangyi.pmx",
+    "materials": [
+      {
+        "name": "M_actor_zhuangfy_body_01",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "M_actor_zhuangfy_cloth_01",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "靴",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "M_actor_zhuangfy_cloth_02",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "M_actor_zhuangfy_brow_01",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "まつげ",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "白目",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "口・鼻線",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "歯",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "舌",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "口内",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "唇",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "M_actor_zhuangfy_face_01",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "M_actor_zhuangfy_hair_01",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "M_actor_zhuangfy_iris_01",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "目HL",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "M_eyeshadow_common_05",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "M_hairshadow_common_01",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "涙",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "涙2",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "涙3",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "照れ",
+        "visible": true,
+        "emissiveNits": null
+      },
+      {
+        "name": "赤面",
+        "visible": true,
+        "emissiveNits": null
+      }
+    ],
+    "morphs": [
+      {
+        "name": "まばたき",
+        "weight": 0
+      },
+      {
+        "name": "ウィンク",
+        "weight": 0
+      },
+      {
+        "name": "ウィンク右",
+        "weight": 0
+      },
+      {
+        "name": "笑い",
+        "weight": 0
+      },
+      {
+        "name": "ウィンク２",
+        "weight": 0
+      },
+      {
+        "name": "ウィンク２右",
+        "weight": 0
+      },
+      {
+        "name": "笑い2",
+        "weight": 0
+      },
+      {
+        "name": "じと目",
+        "weight": 0
+      },
+      {
+        "name": "なごみ",
+        "weight": 0
+      },
+      {
+        "name": "びっくり",
+        "weight": 0
+      },
+      {
+        "name": "瞳小",
+        "weight": 0
+      },
+      {
+        "name": "ｷﾘｯ",
+        "weight": 0
+      },
+      {
+        "name": "悲しむ",
+        "weight": 0
+      },
+      {
+        "name": "恐ろしい子！",
+        "weight": 0
+      },
+      {
+        "name": "真面目",
+        "weight": 0
+      },
+      {
+        "name": "困る",
+        "weight": 0
+      },
+      {
+        "name": "にこり",
+        "weight": 0
+      },
+      {
+        "name": "怒り",
+        "weight": 0
+      },
+      {
+        "name": "上",
+        "weight": 0
+      },
+      {
+        "name": "下",
+        "weight": 0
+      },
+      {
+        "name": "あ",
+        "weight": 0
+      },
+      {
+        "name": "い",
+        "weight": 0
+      },
+      {
+        "name": "う",
+        "weight": 0
+      },
+      {
+        "name": "え",
+        "weight": 0
+      },
+      {
+        "name": "お",
+        "weight": 0
+      },
+      {
+        "name": "ん",
+        "weight": 0
+      },
+      {
+        "name": "▲",
+        "weight": 0
+      },
+      {
+        "name": "にやり",
+        "weight": 0
+      },
+      {
+        "name": "にやり2",
+        "weight": 0
+      },
+      {
+        "name": "にっこり",
+        "weight": 0
+      },
+      {
+        "name": "口角上げ",
+        "weight": 0
+      },
+      {
+        "name": "口角下げ",
+        "weight": 0
+      },
+      {
+        "name": "口横広げ",
+        "weight": 0
+      },
+      {
+        "name": "口横狭め",
+        "weight": 0
+      },
+      {
+        "name": "ハイライト消",
+        "weight": 0
+      }
+    ]
+  },
+  "viewport": {
+    "exposure": {
+      "ev100": 0,
+      "compensation": 0
+    },
+    "mode": "toon",
+    "outline": {
+      "width": 1.6,
+      "color": "#331b36"
+    },
+    "flags": {
+      "grid": true,
+      "skeleton": false,
+      "wireframe": false
+    },
+    "lightUnit": "lux",
+    "lightIntensity": 10,
+    "ambientIntensity": 6,
+    "lightDirection": [
+      -0.01423255508521988,
+      0.2519420795222242,
+      0.9676376506429271
+    ],
+    "shadowEnabled": true,
+    "shadowSoftness": 0.0276,
+    "gizmo": false,
+    "gizmoSpace": "world",
+    "gizmoMode": "rotate",
+    "gizmoPosition": [
+      -5.67160191218019,
+      20.72153654814162,
+      -4.6588786243595575
+    ],
+    "camera": {
+      "position": [
+        0.3706470558358197,
+        15.68743373518386,
+        37.68309556287797
+      ],
+      "target": [
+        0.7326591449070192,
+        11.750693425374156,
+        0.16524753640393863
+      ],
+      "up": [
+        0,
+        1,
+        0
+      ],
+      "fov": 35,
+      "zoom": 1,
+      "near": 0.2694456569091414,
+      "far": 2694.456569091414,
+      "maxDistance": 1077.7826276365656
+    }
+  },
+  "conversion": {
+    "mode": "single",
+    "format": "usda",
+    "output": "",
+    "source": "Zhuang Fangyi.pmx",
+    "scale": 8,
+    "nameMode": "original",
+    "morphs": true,
+    "copyTextures": true,
+    "asciiNames": false,
+    "recursive": false
+  },
+  "inspector": {
+    "tab": "overview",
+    "selectedMaterial": 0,
+    "filter": "",
+    "soloVisibility": null
+  },
+  "savedAt": "2026-11-11T15:38:44.178Z"
+}
