@@ -13,6 +13,7 @@
     "test": "node tests/run-tests.js",
     "test:ui": "electron tests/material-panel-smoke.cjs",
     "test:open": "electron tests/open-file-smoke.cjs",
+    "test:first-run": "electron tests/first-run-smoke.cjs",
     "test:workspace": "node tests/run-workspace-ui.cjs",
     "pack": "electron-builder --dir --publish never",
     "dist": "electron-builder --publish never"

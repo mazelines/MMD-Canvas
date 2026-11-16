@@ -581,13 +581,15 @@ async function saveWorkspace(saveAs = false) {
     const result = await api.saveWorkspace(captureWorkspace(viewer, state, materialPanel), state.workspacePath, saveAs);
     if (!result) return;
     state.workspacePath = result.filePath;
+    localStorage.setItem('lastWorkspace', result.filePath);
     setStatus(t`워크스페이스 저장 완료: ${result.filePath}`, 'ok');
     if (state.dir) await navigate(state.dir, basename(result.filePath));
   } catch (error) { setStatus(t`워크스페이스 저장 실패: ${error.message}`, 'error'); }
   finally { state.workspaceBusy = false; updateWorkspaceBar(); }
 }
 
-async function openWorkspace(filePath = null) {
+/** `remember: false` opens without making it the workspace restored on the next launch. Resolves true once opened. */
+async function openWorkspace(filePath = null, { remember = true } = {}) {
   if (state.workspaceBusy || state.modelLoading || state.busy) return;
   state.workspaceBusy = true; updateWorkspaceBar();
   try {
@@ -613,8 +615,10 @@ async function openWorkspace(filePath = null) {
     finally { state.restoring = false; reportMenuState(); }
     $('convert-dialog').close(); $('convert-result').hidden = true; state.lastOutput = null;
     state.workspacePath = result.filePath;
+    if (remember) localStorage.setItem('lastWorkspace', result.filePath);
     document.title = `${basename(result.filePath)} — MMD Canvas`;
     setStatus(t`워크스페이스 열기 완료: ${result.filePath}${changed ? t(' · 모델 구성이 달라 재질·모프 상태 일부를 생략했습니다.') : ''}`, 'ok');
+    return true;
   } catch (error) { setStatus(t`워크스페이스 열기 실패: ${error.message}`, 'error'); }
   finally { state.workspaceBusy = false; updateWorkspaceBar(); }
 }
@@ -665,6 +669,10 @@ reportMenuState();
   }));
   if (start.testShadow) window.__setShadowTest(start.testShadow !== 'off', start.testShadow === 'off' ? null : Number(start.testShadow));
   if (start.testGizmo) window.__setGizmoTest(start.testGizmo === '1' ? null : start.testGizmo.split(',').map(Number));
+  // The bundled example opens once, on the first launch only; it is not remembered, so later launches
+  // restore the last workspace the user opened or saved themselves.
+  const firstRun = !!start.session && !localStorage.getItem('firstRunDone');
+  if (start.session) localStorage.setItem('firstRunDone', '1');
   if (start.openFile) {
     await openPath(start.openFile);
     if (start.testConvert && state.loadedInfo?.kind === 'pmx') { // automated UI test hook
@@ -674,6 +682,11 @@ reportMenuState();
       $('btn-run').click();
     }
     return;
+  }
+  if (start.session) {
+    const lastWorkspace = localStorage.getItem('lastWorkspace');
+    if (firstRun && start.session.example) { if (await openWorkspace(start.session.example, { remember: false })) return; }
+    else if (lastWorkspace && await api.stat(lastWorkspace).catch(() => null)) { if (await openWorkspace(lastWorkspace)) return; }
   }
   const last = localStorage.getItem('lastDir');
   await navigate(last || start.home);

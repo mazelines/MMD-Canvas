@@ -14,6 +14,8 @@ const fileFromArgv = (argv) => argv.slice(1).find((a) => /\.(canvas|[a-z0-9]{2,5
 const OPEN_AT_START = process.env.MMDCONV_OPEN || fileFromArgv(process.argv);
 let pendingOpenFile = OPEN_AT_START, rendererReady = false;
 const SHOT_PATH = process.env.MMDCONV_SHOT || null;
+// Bundled sample, shipped beside the executable (electron-builder extraFiles) and opened on the first launch.
+const EXAMPLE_WORKSPACE = path.join(app.isPackaged ? path.resolve(process.resourcesPath, '..') : ROOT, 'Example', 'Zhuang Fangyi', 'Zhuang Fangyi.canvas');
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
@@ -178,6 +180,9 @@ handle('app:startup', async () => {
   home: app.getPath('documents'),
   locale: systemLanguage(),
   openFile: pendingOpenFile ? path.resolve(pendingOpenFile) : null,
+  // First-launch example / last-workspace restore. Automated runs start empty unless MMDCONV_SESSION asks for it.
+  session: isTestRun && !process.env.MMDCONV_SESSION ? null
+    : { example: await fs.access(EXAMPLE_WORKSPACE).then(() => EXAMPLE_WORKSPACE, () => null) },
   formats: OUTPUT_FORMATS,
   testShadow: process.env.MMDCONV_SHADOW || null,
   testGizmo: process.env.MMDCONV_GIZMO || null,

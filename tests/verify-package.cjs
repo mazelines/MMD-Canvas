@@ -30,7 +30,12 @@ function verifyPackage(archive, projectDir = path.resolve(__dirname, '..')) {
 }
 
 module.exports = async ({ appOutDir, packager }) => {
-  verifyPackage(path.join(packager.getResourcesDir(appOutDir), 'app.asar'), packager.projectDir);
+  const resources = packager.getResourcesDir(appOutDir);
+  verifyPackage(path.join(resources, 'app.asar'), packager.projectDir);
+  // The first-launch example lives beside the executable; main.js resolves it as <resources>/../Example.
+  for (const file of ['Zhuang Fangyi.canvas', 'Zhuang Fangyi.pmx', 'ReadMe.txt']) {
+    assert.ok(fs.existsSync(path.join(resources, '..', 'Example', 'Zhuang Fangyi', file)), `Packaged example missing: ${file}`);
+  }
 };
 module.exports.verifyPackage = verifyPackage;
 
