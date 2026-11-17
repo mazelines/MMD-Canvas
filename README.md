@@ -10,6 +10,12 @@ PMX(MMD) 모델을 미리 보고 **FBX / USD로 변환**하는 데스크톱 앱�
 
 [배포 파일 다운로드](https://github.com/mazelines/MMD-Canvas/releases) · [CI 실행 결과](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [릴리스 가이드](docs/releases.md)
 
+## v0.5.3: DXR shadow acne 수정
+
+Lambert·Toon에서 표면이 자기 자신을 잘못 가리는 DXR 자기 교차를 수정했습니다. 그림자 광선은 실제 삼각형의 기하 법선과 위치 오차를 기준으로 출발하며, 강한 노멀맵이나 모델 전체 크기에 따라 시작점이 잘못 이동하던 문제를 개선했습니다. 가까운 의상·머리카락 같은 얇은 면의 그림자도 보존합니다.
+
+크기 0.001~1,000배, 원거리 양·음 좌표, 앞·뒷면, 포즈 변경과 얇은 차폐물의 GPU 회귀 테스트를 통과했습니다. 실제 예제의 카메라 이동·리사이즈 1,200프레임에서 GPU 종료와 미반환 프레임이 없었습니다. [계산식과 검증 범위](docs/native-dx12.md#dxr-자기-교차-방지) · [0.5.3 변경 내용](docs/release-notes/v0.5.3.md).
+
 ## v0.5.2: DX12 Ultimate와 안정적인 GPU 화면 전송
 
 **Windows 11 x64와 DirectX 12 Ultimate GPU(feature level 12_2, DXR 1.1 이상)가 필요합니다.** 3D 렌더러를 네이티브 DX12로 통합하고 WebGL 렌더링을 제거했습니다. macOS·Linux 배포는 제공하지 않습니다.

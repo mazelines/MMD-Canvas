@@ -17,7 +17,7 @@ cbuffer Frame : register(b0) {
     float4 grid;             // center X/Z, width, cell size
     uint4 mipInfo[8];        // width, height, packed offset, unused
 };
-cbuffer Draw : register(b1) { uint materialId; uint mipLevel; uint unused0; uint unused1; };
+cbuffer Draw : register(b1) { uint materialId; uint mipLevel; uint triangleOffset; uint unused1; };
 StructuredBuffer<Vertex> vertices : register(t0);
 StructuredBuffer<uint4> triangles : register(t1);
 StructuredBuffer<Material> materials : register(t2);
@@ -39,9 +39,9 @@ float4 imageSample(int id, float2 uv) { return id < 0 ? float4(1,1,1,1) : images
 float4 imageSurface(int id, float2 uv) { return id < 0 ? float4(1,1,1,1) : images[NonUniformResourceIndex(id)].Sample(linearWrap, uv); }
 float2 surfaceUv(Material m, float2 uv) { uv = uv * m.uvTransform.xy + m.uvTransform.zw; return float2(uv.x, m.extra.x > 0 ? 1 - uv.y : uv.y); }
 float surfaceAlpha(Material m, float2 uv) { return m.color.a * imageSample(m.maps.x, uv).a * imageSample(m.maps.y, uv).g; }
-struct Varying { float4 position : SV_Position; float3 world : TEXCOORD0; float3 normal : TEXCOORD1; float2 uv : TEXCOORD2; float depth : TEXCOORD3; };
+struct Varying { float4 position : SV_Position; float3 world : TEXCOORD0; float3 normal : TEXCOORD1; float2 uv : TEXCOORD2; float depth : TEXCOORD3; centroid float3 shadowWorld : TEXCOORD4; };
 Varying vertexMain(uint id : SV_VertexID) {
-    Vertex v = vertices[id]; Varying o; o.world = v.position; o.normal = v.normal; o.uv = v.uv;
+    Vertex v = vertices[id]; Varying o; o.world = o.shadowWorld = v.position; o.normal = v.normal; o.uv = v.uv;
     float4 p = mul(view, float4(v.position, 1)); o.position = mul(projection, p); o.depth = -p.z; return o;
 }
 Varying outlineVertex(uint id : SV_VertexID) {
@@ -77,8 +77,53 @@ float4 normalMain(Varying v, bool front : SV_IsFrontFace) : SV_Target {
     clip(a - max(m.options.x, m.options.y > 0 ? 0.5 : 0.001));
     return float4(mul((float3x3)view, surfaceNormal(v, front,m)), v.depth);
 }
-bool blocked(float3 p, float3 direction, float bias) {
-    RayDesc ray; ray.Origin = p; ray.Direction = direction; ray.TMin = bias; ray.TMax = max(misc.z * 8, 1);
+// Round outward after offsetting: adding a small offset to a large coordinate can
+// otherwise round back onto the surface. Use the smallest normal float at zero
+// because GPU arithmetic is allowed to flush subnormals.
+float roundAway(float value, float direction) {
+    if (direction == 0) return value;
+    if (abs(value) < 1.175494351e-38) return direction > 0 ? 1.175494351e-38 : -1.175494351e-38;
+    return asfloat(asint(value) + ((value > 0) == (direction > 0) ? 1 : -1));
+}
+float3 offsetShadowOrigin(float3 p, float3 normal, float distance) {
+    precise float3 origin = mad(distance, normal, p);
+    return float3(roundAway(origin.x, normal.x), roundAway(origin.y, normal.y), roundAway(origin.z, normal.z));
+}
+struct ShadowSurface { float3 origin; float3 normal; };
+ShadowSurface triangleShadowSurface(float3 p, uint primitive, bool front) {
+    // SV_PrimitiveID restarts for each material draw; the BLAS uses global indices.
+    uint3 indices = triangles[triangleOffset + primitive].xyz;
+    float3 v0 = vertices[indices.x].position;
+    precise float3 e1 = vertices[indices.y].position - v0;
+    precise float3 e2 = vertices[indices.z].position - v0;
+    float3 edgeMax = max(abs(e1), abs(e2));
+    float edgeScale = max(max(edgeMax.x, edgeMax.y), max(edgeMax.z, 1.175494351e-38));
+    float3 normal = cross(e1 / edgeScale, e2 / edgeScale);
+    float normalLength = length(normal);
+    normal = normalLength > 0 ? normal / normalLength : float3(0,0,0);
+    if (!front) normal = -normal;
+
+    // Raster interpolation is not a ray hit reconstruction. Reproject its position
+    // onto this triangle's plane before applying an error-sized geometric offset.
+    // Both rasterization and the identity-instance BLAS read these same world-space
+    // vertices, including skin/morph updates, so no object transform term is needed.
+    precise float3 delta = p - v0;
+    precise float planeDistance = dot(delta, normal);
+    precise float3 onPlane = mad(-planeDistance, normal, p);
+    const float unitRoundoff = 5.960464478e-8;
+    float3 extent3 = abs(e1) + abs(e2) + abs(abs(e1) - abs(e2));
+    float extent = max(max(extent3.x, extent3.y), extent3.z);
+    // Conservative allowance for plane projection/rounding, plus the triangle
+    // intersection term from NVIDIA's DXR self-intersection analysis (3 * u).
+    // This is an estimate for the raster path, not a universal hardware guarantee.
+    float3 error = 4 * unitRoundoff * (abs(v0) + abs(p) + abs(delta)) + 3 * unitRoundoff * extent;
+    ShadowSurface surface;
+    surface.normal = normal;
+    surface.origin = offsetShadowOrigin(onPlane, normal, dot(error, abs(normal)));
+    return surface;
+}
+bool blocked(float3 p, float3 direction) {
+    RayDesc ray; ray.Origin = p; ray.Direction = direction; ray.TMin = 0; ray.TMax = max(misc.z * 8, 1);
     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
     q.TraceRayInline(scene, RAY_FLAG_NONE, 255, ray);
     while (q.Proceed()) {
@@ -92,18 +137,19 @@ bool blocked(float3 p, float3 direction, float bias) {
     }
     return q.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
 }
-float shadowVisibility(float3 p, float3 n, float2 pixel) {
+float shadowVisibility(float3 origin, float3 geometricNormal, float2 pixel) {
     if (settings.z == 0) return 1;
     float3 l = normalize(sun.xyz), tangent = normalize(cross(abs(l.y) < 0.95 ? float3(0,1,0) : float3(1,0,0), l));
     float3 bitangent = cross(l, tangent);
     float phase = frac(52.9829189 * frac(dot(pixel, float2(0.06711056,0.00583715)))) * 6.2831853;
-    float bias = max(misc.z * 0.000005, 0.000001);
     float visibility = 0; uint samples = clamp((uint)ao.z, 1u, 128u);
     for (uint i = 0; i < samples; ++i) {
         float r = sqrt((i + 0.5) / samples) * viewport.z;
         float a = i * 2.39996323 + phase;
         float3 ray = normalize(l + r * (cos(a) * tangent + sin(a) * bitangent));
-        visibility += blocked(p + n * bias, ray, bias) ? 0 : 1;
+        // Reflection shadows stay on the visible geometric side. Moving the origin
+        // to the light-facing back side would let light through thin opaque surfaces.
+        if (dot(geometricNormal, ray) > 0) visibility += blocked(origin, ray) ? 0 : 1;
     }
     return visibility / samples;
 }
@@ -122,12 +168,16 @@ float visibilityAt(int2 pixel) {
     }
     return saturate(1 - (1 - (weight > 0 ? total / weight : 1)) * ao.x);
 }
-float4 colorMain(Varying v, bool front : SV_IsFrontFace) : SV_Target {
+float4 colorMain(Varying v, bool front : SV_IsFrontFace, uint primitive : SV_PrimitiveID) : SV_Target {
     Material m = materials[materialId]; cullSide(m, front); float2 uv = surfaceUv(m, v.uv);
     float alpha = surfaceAlpha(m, uv); clip(alpha - max(m.options.x, 0.001));
     float3 n = surfaceNormal(v, front,m);
     float ndl = dot(n, normalize(sun.xyz));
-    float shade = shadowVisibility(v.world, n, v.position.xy);
+    float shade = 1;
+    if (settings.z != 0) {
+        ShadowSurface surface = triangleShadowSurface(v.shadowWorld, primitive, front);
+        shade = shadowVisibility(surface.origin, surface.normal, v.position.xy);
+    }
     float band = settings.y > 0 ? (ndl * 0.5 + 0.5 < 0.5 ? 64.0/255.0 : 1) : max(ndl, 0);
     float direct = settings.y > 0 ? lerp(64.0/255.0, band, shade) : band * shade;
     float3 fill = lerp(ground.rgb, sky.rgb, settings.y > 0 ? 0.5 : n.y * 0.5 + 0.5) * sky.w;
@@ -203,7 +253,12 @@ void cortao_writeResult(int2 p, float visibility, float3 bentNormal, float3x3 ba
         if(t>0 && direction.y<-0.00001) {
             float3 p=origin+direction*t;float2 coord=p.xz-grid.xy;
             float fade=1-smoothstep(misc.z*0.35,misc.z*0.65,length(coord));
-            if(settings.z>0 && fade>0)bg*=1-0.5*(1-shadowVisibility(p,float3(0,1,0),float2(tid.xy)))*fade;
+            if(settings.z>0 && fade>0) {
+                // The analytic ground has an exact Y plane and is not in the BLAS.
+                // Snap Y to it rather than retaining the camera-ray intersection error.
+                float3 groundOrigin = float3(p.x, roundAway(misc.x, 1), p.z);
+                bg*=1-0.5*(1-shadowVisibility(groundOrigin,float3(0,1,0),float2(tid.xy)))*fade;
+            }
             if(background.w>0 && all(abs(coord)<grid.z*0.5)) {
                 float pixelWorld=max(t*2/(projection[1][1]*viewport.y),0.000001);
                 float2 edge=abs(frac(coord/grid.w+0.5)-0.5)*grid.w;

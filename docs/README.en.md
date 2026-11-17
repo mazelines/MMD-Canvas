@@ -10,6 +10,12 @@ A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
 
+## v0.5.3: DXR shadow acne fix
+
+Fix erroneous self-shadowing in Lambert and Toon. Shadow rays now start from the actual triangle's geometric normal with an offset based on position error, improving cases involving strong normal maps and changes in overall model size. Nearby shadows from thin surfaces such as clothing and hair are preserved.
+
+GPU regression tests cover scales from 0.001 to 1,000, distant positive/negative coordinates, front/back faces, pose updates, and thin occluders. The real example completed 1,200 frames of camera movement and resizing with no GPU-process exits or outstanding frames. [Equations and validation scope](native-dx12.md#dxr-자기-교차-방지) · [0.5.3 release notes](release-notes/v0.5.3.md).
+
 ## v0.5.2: DX12 Ultimate and reliable GPU presentation
 
 **Requires Windows 11 x64 and a DirectX 12 Ultimate GPU (feature level 12_2, DXR 1.1 or newer).** All 3D rendering uses native DX12; WebGL rendering has been removed. macOS and Linux builds are no longer distributed.

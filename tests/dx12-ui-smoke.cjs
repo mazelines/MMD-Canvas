@@ -40,7 +40,7 @@ app.on('browser-window-created',(_event,win)=>{
         const check=(ok,message)=>{if(!ok)throw new Error(message)};
         const wait=async f=>{for(let i=0;i<1000;i++){if(f())return;const status=document.getElementById('renderer-status').textContent;if(status.startsWith('DX12:'))throw new Error(status);await new Promise(r=>setTimeout(r,25))}throw new Error('DX12 wait timed out: '+document.getElementById('renderer-status').textContent)};
         await wait(()=>window.__viewer?.dx12?.lastFrame&&!__viewer.dx12.busy);
-        const v=__viewer;v.dx12.enabled=false;v.controls.enableDamping=false;v.controls.enabled=false;v.controls.target.set(0,0,0);
+        const v=__viewer;v.dx12.enabled=false;v.controls.enableDamping=false;v.controls.enabled=false;v.controls.target.set(0,0,0);v.controls.update=()=>false;
         const THREE=await import('three'),{nativeModel}=await import('./dx12.js');
         const model=new THREE.Group(),material=new THREE.MeshLambertMaterial({color:0xb8bdcc,side:THREE.DoubleSide});
         const floor=new THREE.Mesh(new THREE.PlaneGeometry(6,6),material);floor.rotation.x=-Math.PI/2;floor.position.y=-1;model.add(floor);
@@ -50,10 +50,10 @@ app.on('browser-window-created',(_event,win)=>{
         await api.dx12Model(nativeModel(model));
         const render=async(options={})=>{
           const data=v.dx12.frame(),f=new Float32Array(data,4);
-          f.set([0.3481553,0.6963106,0.6270597,options.sun??10],32);f.set([1,1,1,options.ambient??4],36);f.set([1,1,1,0],40);
+          f.set([...(options.direction??[0.3481553,0.6963106,0.6270597]),options.sun??10],32);f.set([1,1,1,options.ambient??4],36);f.set([1,1,1,0],40);
           f.set([options.width??160,160,options.softness??0.06,1],44);
           f.set([options.exposure??100,options.toon??0,options.shadow??0,options.ao??0],48);
-          f.set([1,options.debug??0,32,0],52);f.set([...(options.background??[0.03,0.03,0.03]),0],56);f.set([-1,10,7,options.outline??0],60);
+          f.set([1,options.debug??0,32,0],52);f.set([...(options.background??[0.03,0.03,0.03]),0],56);f.set([options.ground??-1,10,options.diagonal??7,options.outline??0],60);
           await api.dx12Render(data);const c=document.getElementById('dx12-canvas');return c.getContext('2d').getImageData(0,0,c.width,c.height).data;
         };
         const difference=(a,b)=>{let darker=0,changed=0,max=0;for(let i=0;i<a.length;i+=4){const d=a[i]-b[i];if(d>2)darker++;if(Math.abs(d)>2)changed++;max=Math.max(max,Math.abs(d))}return{darker,changed,max}};
@@ -93,9 +93,11 @@ app.on('browser-window-created',(_event,win)=>{
         const rgba=new Uint8Array(4*4*4);for(let i=0;i<rgba.length;i+=4){rgba[i]=255;rgba[i+3]=255;}
         textured.material.map=new THREE.DataTexture(rgba,4,4);textured.material.map.needsUpdate=true;
         await api.dx12Model(nativeModel(textured));check(difference(compressed,await render()).max<=1,'Native BC1 decoding must match RGBA pixels');
+        const {runShadowCases}=await import('../tests/dx12-shadow-cases.js');
+        const selfIntersection=await runShadowCases({viewer:v,THREE,nativeModel,render,difference,check});
         await api.dx12Model(nativeModel(new THREE.Group()));const clear=await render({background:[0.2,0.4,0.8]});
         check([124,170,231,255].every((value,i)=>Math.abs(clear[i]-value)<=1),'GPU presentation copy must preserve the native sRGB output bytes: '+Array.from(clear.slice(0,4)));
-        await api.dx12Stop();return{shadow,penumbra:soft,ambient,exposureIndependent:true,emissionPreserved:true,poseUpdates:true,compressedDDS:true,emptyScene:true,resizes:12};
+        await api.dx12Stop();return{shadow,penumbra:soft,ambient,selfIntersection,exposureIndependent:true,emissionPreserved:true,poseUpdates:true,compressedDDS:true,emptyScene:true,resizes:12};
       })()`);
       if(errors.length)throw new Error(errors.join('\n'));console.log('DX12 GPU smoke passed:',JSON.stringify(result));clearTimeout(timeout);app.exit(0);
     }catch(e){console.error(e,errors);clearTimeout(timeout);app.exit(1);}

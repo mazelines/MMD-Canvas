@@ -226,7 +226,7 @@ struct NativeRenderer {
         for(int pass=0;pass<(normals?1:2);pass++) for(size_t start=0;start<triangles.size();) {
             size_t end=start+1;uint32_t mat=triangles[start].material;while(end<triangles.size()&&triangles[end].material==mat)end++;
             bool transparent=materials[mat].options[1]>0;
-            if(normals||int(transparent)==pass) { d.list->SetPipelineState(normals?normalPso.Get():wireframe?wirePso.Get():materials[mat].extra[3]>0?colorPso.Get():transparentPso.Get());uint32_t values[4]{mat,0,0,0};d.list->SetGraphicsRoot32BitConstants(1,4,values,0);d.list->DrawIndexedInstanced(UINT((end-start)*3),1,UINT(start*3),0,0); }
+            if(normals||int(transparent)==pass) { d.list->SetPipelineState(normals?normalPso.Get():wireframe?wirePso.Get():materials[mat].extra[3]>0?colorPso.Get():transparentPso.Get());uint32_t values[4]{mat,0,UINT(start),0};d.list->SetGraphicsRoot32BitConstants(1,4,values,0);d.list->DrawIndexedInstanced(UINT((end-start)*3),1,UINT(start*3),0,0); }
             start=end;
         }
         if(!normals&&outlines){d.list->SetPipelineState(outlinePso.Get());for(size_t start=0;start<triangles.size();){size_t end=start+1;uint32_t mat=triangles[start].material;while(end<triangles.size()&&triangles[end].material==mat)end++;uint32_t values[4]{mat,0,0,0};d.list->SetGraphicsRoot32BitConstants(1,4,values,0);d.list->DrawIndexedInstanced(UINT((end-start)*3),1,UINT(start*3),0,0);start=end;}}

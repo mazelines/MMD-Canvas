@@ -10,6 +10,12 @@ PMX（MMD）モデルをプレビューし、**FBX / USD に変換**するデス
 
 [ダウンロード](https://github.com/mazelines/MMD-Canvas/releases) · [CI 結果](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [リリースガイド（韓国語）](releases.md)
 
+## v0.5.3：DXR の shadow acne を修正
+
+Lambert・Toon で表面が誤って自分自身を遮る自己交差を修正しました。実際の三角形の幾何法線と位置誤差に基づいてシャドウレイの始点を補正し、強い法線マップやモデル全体のサイズによる誤判定を改善します。衣装や髪など、近接する薄い面の影も保持します。
+
+0.001～1,000 倍のスケール、正負の遠距離座標、表裏、ポーズ変更、薄い遮蔽物の GPU 回帰テストを通過しました。実際のサンプルによるカメラ移動・リサイズ 1,200 フレームで、GPU プロセスの終了や未返却フレームはありませんでした。[計算式と検証範囲](native-dx12.md#dxr-자기-교차-방지) · [0.5.3 リリースノート](release-notes/v0.5.3.md)。
+
 ## v0.5.2：DX12 Ultimate と GPU 表示の安定化
 
 **Windows 11 x64 と DirectX 12 Ultimate 対応 GPU（feature level 12_2、DXR 1.1 以上）が必要です。** 3D 描画をネイティブ DX12 に統一し、WebGL 描画を削除しました。macOS・Linux 向けビルドは提供しません。

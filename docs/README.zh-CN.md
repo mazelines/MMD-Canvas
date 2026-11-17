@@ -10,6 +10,12 @@
 
 [下载](https://github.com/mazelines/MMD-Canvas/releases) · [CI 结果](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [发布指南（韩语）](releases.md)
 
+## v0.5.3：修复 DXR shadow acne
+
+修复 Lambert、Toon 模式中表面错误遮挡自身的自相交问题。阴影光线现在根据实际三角形的几何法线和位置误差调整起点，改善强法线贴图或模型整体尺寸变化引起的误判，同时保留衣物、头发等邻近薄面的阴影。
+
+GPU 回归测试覆盖 0.001～1,000 倍缩放、远处正负坐标、正反面、姿态更新及薄遮挡物。实际示例完成相机移动和窗口缩放共 1,200 帧，未出现 GPU 进程退出或未归还帧。[计算公式与验证范围](native-dx12.md#dxr-자기-교차-방지) · [0.5.3 发布说明](release-notes/v0.5.3.md)。
+
 ## v0.5.2：DX12 Ultimate 与 GPU 显示稳定性
 
 **需要 Windows 11 x64 和支持 DirectX 12 Ultimate 的 GPU（feature level 12_2、DXR 1.1 或更高）。** 所有 3D 渲染统一使用原生 DX12，已移除 WebGL 渲染。不再提供 macOS、Linux 安装包。
