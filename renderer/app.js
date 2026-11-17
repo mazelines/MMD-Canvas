@@ -3,6 +3,8 @@ import { Viewer, VIEWABLE } from './viewer.js';
 import { MaterialPanel } from './material-panel.js';
 import { captureWorkspace, restoreWorkspaceState } from './workspace-state.js';
 import { DEFAULT_LIGHT_LUX, DEFAULT_AMBIENT_LUX, DEFAULT_EV100, clampLightLux, legacyLightToLux } from '../src/core/lighting.js';
+import { DEFAULT_CORTAO } from '../src/core/ambient-occlusion.js';
+import { Dx12Viewport } from './dx12.js';
 
 const api = window.api;
 const startup = await api.startup();
@@ -17,6 +19,11 @@ const el = (tag, props = {}, ...children) => {
 };
 
 const viewer = new Viewer($('canvas-host'));
+viewer.dx12 = new Dx12Viewport(viewer, $('renderer-status'));
+localStorage.removeItem('viewportBackend');
+$('renderer-retry').addEventListener('click', () => viewer.dx12.start());
+void viewer.dx12.start();
+$('dxr-quality').addEventListener('change', () => { viewer.dx12.shadowSamples = Number($('dxr-quality').value); viewer.requestRender(); });
 const materialPanel = new MaterialPanel(viewer);
 const applyRenderMode = (mode, save = false) => {
   viewer.setRenderMode(mode);
@@ -83,6 +90,46 @@ const state = {
   modelLoadId: 0,
   conversionSource: null,
 };
+{
+  const enabled = $('cortao-enabled'), intensity = $('cortao-intensity'), radius = $('cortao-radius');
+  const debug = $('cortao-debug'), hint = $('cortao-debug-hint');
+  const sync = () => {
+    const settings = viewer.cortao.settings;
+    enabled.checked = settings.enabled;
+    for (const [input, key] of [[intensity, 'intensity'], [radius, 'radius']]) {
+      if (document.activeElement !== input) input.value = String(settings[key]);
+      input.disabled = !settings.enabled;
+    }
+    debug.value = viewer.cortao.debugView;
+    hint.hidden = debug.value === 'off';
+    hint.textContent = !settings.enabled ? t('CORTAO가 꺼져 있습니다. 켜면 차폐량을 확인할 수 있습니다.')
+      : debug.value === 'raw' ? t('검정: 차폐 · 흰색: 개방. 필터·강도 적용 전 값입니다.')
+      : t('검정: 차폐 · 흰색: 개방. 필터·강도 적용 후 값입니다.');
+  };
+  const apply = () => {
+    viewer.setCortao({ enabled: enabled.checked,
+      intensity: Number.isFinite(intensity.valueAsNumber) ? intensity.valueAsNumber : viewer.cortao.settings.intensity,
+      radius: Number.isFinite(radius.valueAsNumber) ? radius.valueAsNumber : viewer.cortao.settings.radius });
+    sync();
+    if (!state.restoring) localStorage.setItem('viewportCortao', JSON.stringify(viewer.cortao.settings));
+  };
+  enabled.addEventListener('change', apply);
+  debug.addEventListener('change', () => { viewer.setCortaoDebug(debug.value); sync(); });
+  for (const [input, key] of [[intensity, 'intensity'], [radius, 'radius']]) {
+    input.addEventListener('input', apply);
+    input.addEventListener('blur', () => { input.value = String(viewer.cortao.settings[key]); });
+  }
+  $('cortao-reset').addEventListener('click', () => {
+    viewer.setCortaoDebug('off'); viewer.setCortao(DEFAULT_CORTAO); sync();
+    localStorage.setItem('viewportCortao', JSON.stringify(viewer.cortao.settings));
+  });
+  try {
+    const saved = localStorage.getItem('viewportCortao') ?? localStorage.getItem('viewportGtao');
+    viewer.setCortao(JSON.parse(saved || 'null') || DEFAULT_CORTAO);
+  }
+  catch { /* ignore malformed preferences */ }
+  sync();
+}
 const OPENABLE = [...VIEWABLE, '.canvas'];
 
 const basename = (p) => p.replace(/^.*[\\/]/, '');
@@ -265,6 +312,7 @@ function renderInfo(info, filePath) {
     info.kind === 'pmx' ? [t('모프'), fmtNum(info.morphs)] : [t('메시'), fmtNum(info.meshes)],
     info.kind === 'pmx' ? [t('텍스처'), fmtNum(info.textures)] : null,
     info.kind === 'pmx' ? [t('물리'), t`강체 ${fmtNum(info.rigidBodies)} · 조인트 ${fmtNum(info.joints)}`] : null,
+    info.animations ? [t('애니메이션'), t`클립 ${fmtNum(info.animations)}개`] : null,
   ].filter(Boolean);
   const grid = $('info');
   grid.replaceChildren();
@@ -275,6 +323,7 @@ function renderInfo(info, filePath) {
   $('warnings').replaceChildren(...info.warnings.map((w) => el('li', { textContent: w })));
 
   materialPanel.load();
+  animationBar.load();
 
   $('panel-morphs').hidden = !info.morphList.length;
   $('morph-count').textContent = info.morphList.length;
@@ -293,6 +342,71 @@ $('btn-reset-morphs').addEventListener('click', () => {
     if (Number(range.value) !== 0) { range.value = 0; row.querySelector('output').textContent = '0'; viewer.setMorph(i, 0); }
   });
 });
+
+// ---------------- animation playback ----------------
+// Shown only while the open model carries animation clips; loop and speed are remembered across models.
+const animationBar = (() => {
+  const bar = $('animation-bar'), play = $('anim-play'), clip = $('anim-clip'), seek = $('anim-seek');
+  const time = $('anim-time'), speed = $('anim-speed'), loop = $('anim-loop');
+  const savePrefs = () => localStorage.setItem('animationPrefs', JSON.stringify({ loop: loop.checked, speed: Number(speed.value) }));
+  try {
+    const p = JSON.parse(localStorage.getItem('animationPrefs') || '{}');
+    if (typeof p.loop === 'boolean') loop.checked = p.loop;
+    if ([...speed.options].some((o) => Number(o.value) === p.speed)) speed.value = String(p.speed);
+  } catch { /* ignore broken prefs */ }
+
+  const update = (s) => {
+    const label = s.playing ? t('일시정지 (Space)') : t('재생 (Space)');
+    play.textContent = s.playing ? '❚❚' : '▶';
+    play.title = label;
+    play.setAttribute('aria-label', label);
+    seek.max = String(s.duration);
+    seek.value = String(s.time);
+    time.textContent = `${s.time.toFixed(2)} / ${s.duration.toFixed(2)} s`;
+  };
+  viewer.onAnimationFrame = update;
+
+  const toggle = () => {
+    const s = viewer.getAnimation();
+    if (s) viewer.setAnimationPlaying(!s.playing);
+  };
+  play.addEventListener('click', toggle);
+  $('anim-restart').addEventListener('click', () => viewer.seekAnimation(0));
+  clip.addEventListener('change', () => viewer.setAnimationClip(Number(clip.value)));
+  speed.addEventListener('change', () => { viewer.setAnimationSpeed(Number(speed.value)); savePrefs(); });
+  loop.addEventListener('change', () => { viewer.setAnimationLoop(loop.checked); savePrefs(); });
+
+  // Playback would drag the thumb out from under the pointer, so it waits while the user scrubs.
+  let resumeAfterScrub = false;
+  const endScrub = () => {
+    if (resumeAfterScrub) viewer.setAnimationPlaying(true);
+    resumeAfterScrub = false;
+  };
+  seek.addEventListener('pointerdown', () => {
+    if (!viewer.getAnimation()?.playing) return;
+    resumeAfterScrub = true;
+    viewer.setAnimationPlaying(false);
+  });
+  seek.addEventListener('input', () => viewer.seekAnimation(seek.valueAsNumber));
+  for (const type of ['change', 'pointerup', 'pointercancel']) seek.addEventListener(type, endScrub);
+
+  return {
+    toggle,
+    /** Call after the viewer's model changed (loaded, replaced or cleared). */
+    load() {
+      const s = viewer.getAnimation();
+      resumeAfterScrub = false;
+      bar.hidden = !s;
+      $('viewport').classList.toggle('has-animation', !!s);
+      if (!s) return;
+      clip.replaceChildren(...s.clips.map((c, i) => el('option', { value: String(i), textContent: `${c.name || t`클립 ${i + 1}`} (${c.duration.toFixed(2)} s)` })));
+      clip.value = String(s.index);
+      clip.disabled = s.clips.length < 2;
+      viewer.setAnimationLoop(loop.checked);
+      viewer.setAnimationSpeed(Number(speed.value)); // notifies, which fills in the rest of the bar
+    },
+  };
+})();
 
 // ---------------- toolbar ----------------
 {
@@ -410,6 +524,8 @@ window.addEventListener('keydown', (ev) => {
   else if (ev.ctrlKey && ev.code === 'KeyO') { ev.preventDefault(); $('btn-open').click(); }
   else if (ev.ctrlKey && ev.code === 'KeyE') { ev.preventDefault(); if (!$('btn-convert').disabled) $('btn-convert').click(); }
   else if (plain && ev.code === 'KeyF') viewer.frame();
+  // Space already activates a focused button, checkbox or list; only take it when nothing else will.
+  else if (plain && ev.code === 'Space' && !ev.shiftKey && viewer.getAnimation() && !/^(BUTTON|INPUT|SELECT|A)$/.test(el?.tagName || '')) { ev.preventDefault(); animationBar.toggle(); }
   else if (plain && ev.code === 'KeyW' && $('flag-light-gizmo').checked) viewer.setLightGizmoMode('translate');
   else if (plain && ev.code === 'KeyE' && $('flag-light-gizmo').checked) viewer.setLightGizmoMode('rotate');
   else if (plain && ev.code === 'KeyX' && $('flag-light-gizmo').checked) $('btn-light-space').click();
@@ -604,6 +720,7 @@ async function openWorkspace(filePath = null, { remember = true } = {}) {
       $('morphs').replaceChildren(); $('btn-convert').disabled = true;
       $('empty-hint').hidden = false; $('viewport-error').hidden = true;
       materialPanel.load();
+      animationBar.load();
     }
     $('filter-input').value = data.browser.filter; $('only-3d').checked = data.browser.only3d;
     let directory = data.browser.directory;
@@ -669,10 +786,6 @@ reportMenuState();
   }));
   if (start.testShadow) window.__setShadowTest(start.testShadow !== 'off', start.testShadow === 'off' ? null : Number(start.testShadow));
   if (start.testGizmo) window.__setGizmoTest(start.testGizmo === '1' ? null : start.testGizmo.split(',').map(Number));
-  // The bundled example opens once, on the first launch only; it is not remembered, so later launches
-  // restore the last workspace the user opened or saved themselves.
-  const firstRun = !!start.session && !localStorage.getItem('firstRunDone');
-  if (start.session) localStorage.setItem('firstRunDone', '1');
   if (start.openFile) {
     await openPath(start.openFile);
     if (start.testConvert && state.loadedInfo?.kind === 'pmx') { // automated UI test hook
@@ -685,8 +798,10 @@ reportMenuState();
   }
   if (start.session) {
     const lastWorkspace = localStorage.getItem('lastWorkspace');
-    if (firstRun && start.session.example) { if (await openWorkspace(start.session.example, { remember: false })) return; }
-    else if (lastWorkspace && await api.stat(lastWorkspace).catch(() => null)) { if (await openWorkspace(lastWorkspace)) return; }
+    // Reinstalls retain localStorage. A stale first-run flag must never suppress
+    // the bundled project when no user workspace can be restored.
+    if (lastWorkspace && await api.stat(lastWorkspace).catch(() => null)) { if (await openWorkspace(lastWorkspace)) return; }
+    if (start.session.example && await openWorkspace(start.session.example, { remember: false })) return;
   }
   const last = localStorage.getItem('lastDir');
   await navigate(last || start.home);

@@ -1,4 +1,4 @@
-// First launch opens the bundled example once; later launches restore the last workspace the user opened.
+// Restore a valid user workspace, otherwise open the bundled example (including old profiles).
 // A window reload stands in for an app restart: localStorage persists, the renderer starts over.
 const { app, dialog } = require('electron');
 const assert = require('node:assert/strict');
@@ -11,15 +11,19 @@ app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
-app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'mmd-first-run-')));
+const profile=fs.mkdtempSync(path.join(os.tmpdir(), 'mmd-first-run-'));
+app.setPath('userData', profile);
 process.env.MMDCONV_LOCALE = 'ko-KR';
 process.env.MMDCONV_SESSION = '1';
 delete process.env.MMDCONV_OPEN;
 delete process.env.MMDCONV_SHOT;
 const root = path.resolve(__dirname, '..');
 const example = path.join(root, 'Example', 'Zhuang Fangyi', 'Zhuang Fangyi.canvas');
+const userWorkspace=path.join(profile,'User.canvas');
+const userData=JSON.parse(fs.readFileSync(example,'utf8'));userData.model.path=path.join(path.dirname(example),'Zhuang Fangyi.pmx');userData.browser.directory=path.dirname(example);
+fs.writeFileSync(userWorkspace,JSON.stringify(userData));
 const errors = [];
-dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [example] });
+dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [userWorkspace] });
 const timeout = setTimeout(() => { console.error('First run timed out', errors); app.exit(1); }, 180000);
 app.on('browser-window-created', (_event, win) => {
   win.webContents.on('console-message', event => {
@@ -40,26 +44,27 @@ app.on('browser-window-created', (_event, win) => {
       win.webContents.reload();
       await loaded;
     };
-    const opened = () => run('document.getElementById("workspace-name").textContent === "Zhuang Fangyi.canvas" && window.__viewer.current?.kind === "pmx" && !document.getElementById("workspace-open").disabled');
-    const empty = () => run('!!window.__viewer && !!document.getElementById("path-input").value && !window.__viewer.current && !document.getElementById("workspace-open").disabled');
+    const opened = () => run('document.getElementById("workspace-name").textContent === "Zhuang Fangyi.canvas" && window.__viewer.current?.kind === "pmx" && !document.getElementById("workspace-open").disabled && __viewer.dx12?.enabled && !__viewer.dx12.error && !__viewer.dx12.busy && __viewer.dx12.loadedKey.startsWith(__viewer.current.object.uuid)');
+    const userOpened = () => run('document.getElementById("workspace-name").textContent === "User.canvas" && !!window.__viewer.current && !document.getElementById("workspace-open").disabled && __viewer.dx12?.enabled && !__viewer.dx12.error && !__viewer.dx12.busy && __viewer.dx12.loadedKey.startsWith(__viewer.current.object.uuid)');
     try {
       await wait(opened, 'example on first launch');
       assert.equal(await run('localStorage.getItem("lastWorkspace")'), null);
 
+      await run('localStorage.setItem("firstRunDone","1")');
       await restart();
-      await wait(empty, 'second launch starts empty');
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      assert.equal(await run('window.__viewer.current'), null);
-      assert.equal(await run('document.getElementById("workspace-name").textContent'), '저장되지 않은 작업');
+      await wait(opened, 'old first-run flag cannot suppress the example');
+      await run('localStorage.setItem("lastWorkspace","C:/missing/old-project.canvas")');
+      await restart();
+      await wait(opened, 'missing previous workspace falls back to bundled project');
 
       await run('document.getElementById("workspace-open").click()');
-      await wait(opened, 'workspace opened by the user');
-      assert.equal(await run('localStorage.getItem("lastWorkspace")'), example);
+      await wait(userOpened, 'workspace opened by the user');
+      assert.equal(await run('localStorage.getItem("lastWorkspace")'), userWorkspace);
 
       await restart();
-      await wait(opened, 'last workspace restored');
+      await wait(userOpened, 'last workspace takes precedence over bundled project');
       assert.deepEqual(errors, []);
-      console.log('First run passed: example once, empty second launch, last workspace restored');
+      console.log('First run passed: fresh profile, stale first-run flag, missing workspace fallback, user workspace restored');
       clearTimeout(timeout);
       app.exit(0);
     } catch (error) {

@@ -13,6 +13,7 @@ export function captureWorkspace(viewer, state, panel) {
     } : null,
     viewport: {
       exposure: { ...viewer.exposure },
+      cortao: { ...viewer.cortao.settings },
       mode: viewer.renderMode, outline: { ...viewer.outlineSettings }, flags: { ...viewer.flags },
       lightIntensity: viewer.lightLevel, lightUnit: 'lux', ambientIntensity: viewer.ambientLevel, lightDirection: viewer.sun.position.toArray(),
       shadowEnabled: viewer.shadow.enabled, shadowSoftness: viewer.shadow.softness,
@@ -40,6 +41,11 @@ export function restoreWorkspaceState(data, viewer, state, panel, applyRenderMod
     $(id).dispatchEvent(new Event(event));
   };
   const v = data.viewport;
+  // Buffer inspection is temporary and never overrides a restored workspace view.
+  change('cortao-debug', 'off');
+  $('cortao-intensity').value = String(v.cortao.intensity);
+  $('cortao-radius').value = String(v.cortao.radius);
+  change('cortao-enabled', v.cortao.enabled, true);
   $('exposure-ev100').value = String(v.exposure.ev100);
   change('exposure-compensation', v.exposure.compensation, false, 'input');
   applyRenderMode(v.mode);

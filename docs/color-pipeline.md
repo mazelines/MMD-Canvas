@@ -55,7 +55,7 @@ display = sRGB(GT7(B))
 
 HDR 버퍼는 `L / 100`을 저장하므로, 노출 패스에서 100을 곱해 물리 휘도를 복원합니다. 이어서 언리얼의 수동 노출 관계식 `B = Exposure × L`을 적용합니다. 보정은 양수가 밝아지는 방향입니다. [Epic의 수동 노출 설명](https://dev.epicgames.com/documentation/en-us/unreal-engine/auto-exposure-in-unreal-engine).
 
-GT7은 투명도·그림자·발광 합성 이후의 노출된 RGB에 한 번만 적용합니다. `renderer.toneMappingExposure`에 의존하지 않고 실제 출력 셰이더의 노출 유니폼으로 제어합니다. 자동 노출·눈 적응은 사용하지 않습니다. 편집용 단색 배경·그리드·기즈모·본·아웃라인에는 반대 배율을 적용해 일반적인 노출 범위에서 선택한 색을 유지합니다. 극단적인 노출 조합에서는 half-float 저장 범위에 제한됩니다.
+GT7은 투명도·그림자·발광 합성 이후의 노출된 RGB에 한 번만 적용합니다. DX12 출력 컴퓨트 셰이더의 노출 상수로 제어합니다. 자동 노출·눈 적응은 사용하지 않습니다. 배경·그리드·기즈모·본은 편집용 색을 그대로 표시하고, 아웃라인에는 노출·톤매핑의 역변환을 적용합니다. 극단적인 노출 조합에서는 half-float 저장 범위에 제한됩니다.
 
 설정은 로컬 환경설정과 `.canvas`의 `viewport.exposure: { ev100, compensation }`에 저장합니다. 노출 항목이 없는 기존 작업 파일에는 EV100 `log2(100) ≈ 6.643856`, 보정 0을 적용해 이전의 노출 배율 1을 유지합니다. 신규 작업은 EV100 0에서 시작합니다.
 
@@ -72,7 +72,7 @@ L_emissive = dot(emissiveRGB_nits, Rec.709 luminance coefficients)
 
 모델 형식들의 원본 발광 배율에는 공통된 절대 단위가 없습니다. 가져온 값은 기존 뷰포트 해석을 유지하도록 **원본 흰색 발광 값 1 = 100 cd/m²**로 환산합니다. 이 값은 측정된 물리 휘도라는 뜻이 아닙니다. 실제 값을 알고 있다면 패널에서 지정하세요. 원본 발광 배율은 별도로 표시하며, ↺ 버튼으로 기본 환산값을 복원합니다.
 
-뷰포트는 별도 재질 인스턴스로 물리 발광을 적용하므로 원본 재질과 내보내기 값은 보존합니다. `.canvas`는 재질별 `emissiveNits`에 사용자 지정 값을 저장하고, `null`은 원본 환산값 사용을 뜻합니다. 사용자 정의 ShaderMaterial은 자체 셰이더 규약을 유지합니다.
+뷰포트는 별도 재질 인스턴스로 물리 발광을 적용하므로 원본 재질과 내보내기 값은 보존합니다. `.canvas`는 재질별 `emissiveNits`에 사용자 지정 값을 저장하고, `null`은 원본 환산값 사용을 뜻합니다. 사용자 정의 GLSL ShaderMaterial은 지원하지 않으며 오류를 표시합니다.
 
 ## GT7 SDR 설정
 
@@ -90,19 +90,34 @@ L_emissive = dot(emissiveRGB_nits, Rec.709 luminance coefficients)
 
 입력 Linear Rec.709를 Rec.2020으로 변환하고, ICtCp에서 명도와 색도를 분리해 하이라이트 채도를 조정합니다. 결과는 SDR Rec.709 범위로 제한한 후 sRGB로 한 번만 인코딩합니다. 내부 PQ 계산은 지각 색 공간 변환용이며, HDR 디스플레이 출력 모드를 뜻하지 않습니다. 현재 출력은 SDR이며 자동 노출·블룸은 추가하지 않았습니다.
 
-Three.js의 `renderer.toneMapping`은 `NoToneMapping`으로 두어 재질 단계의 중복 적용을 막습니다. 실제 GT7 연산은 마지막 전체 화면 패스에서 수행합니다. 따라서 개별 재질의 `toneMapped` 속성과 관계없이 최종 뷰포트에 적용됩니다. Toon의 두 명암 단계는 유지되며, 원본 텍스처 변화와 부드러운 그림자 경계는 그대로 반영합니다.
+GT7 연산은 DX12의 마지막 출력 패스에서 수행합니다. 개별 재질의 `toneMapped` 속성과 관계없이 최종 뷰포트에 적용됩니다. Toon 명암과 부드러운 그림자 경계는 유지합니다.
 
-GT7 참조 구현의 [MIT 고지](../licenses/GT7-MIT.txt)는 앱 패키지에도 포함합니다. GLSL은 [gt7-tonemapping.js](../renderer/gt7-tonemapping.js), 선형 버퍼와 출력 패스는 [color-pipeline.js](../renderer/color-pipeline.js)에 있습니다.
+GT7 참조 구현의 [MIT 고지](../licenses/GT7-MIT.txt)는 앱 패키지에도 포함합니다. HLSL은 [gt7.hlsl](../native/dx12/gt7.hlsl), 선형 버퍼와 출력 패스는 [renderer.h](../native/dx12/renderer.h)와 [viewport.hlsl](../native/dx12/viewport.hlsl)에 있습니다.
+
+## CORTAO
+
+Windows 11의 [DX12 네이티브 경로](native-dx12.md)에서 전체 해상도 깊이·법선 프리패스와 CORTAO HLSL을 사용합니다. `renderer/cortao.js`는 편집 설정만 관리하며 GPU 패스를 만들지 않습니다.
+
+Daniel Isheden의 [CORTAO 1.0.3](https://github.com/theagentd/CORTAO/tree/420b168d88dd6f9276077ba62f3711cac9d7b46c) 원본 헤더를 직접 컴파일합니다. 픽셀당 32개 샘플, 32개 cosine-weighted 광선과 정수 3D 룩업 테이블을 사용합니다. 깊이·법선은 R32_UINT로 묶고 최대 8개 밉 단계를 사용합니다. 원본 헤더·LUT와 [MIT 고지](../licenses/CORTAO-MIT.txt)를 보관합니다.
+
+Lambert/Toon 셰이더의 간접 확산광 항에 가시성을 적용한 뒤 선형 HDR 버퍼에 기록합니다. EV100, GT7 톤매핑, sRGB 출력은 그 이후입니다. 깊이·법선에 대한 CORTAO 계산 자체는 조명 전에 별도 패스로 수행하며, 완성된 화면에 AO를 곱하지 않습니다. 재질 AO 텍스처와 화면 공간 AO는 `min(materialAO, CORTAO)`로 결합해 같은 틈을 중복으로 어둡게 만드는 문제를 피합니다. 직접광·발광·헐 아웃라인·그리드·기즈모·배경은 변경하지 않습니다. 현재 뷰포트의 주변광이 0 lux이면 효과가 없습니다.
+
+이 구성은 [CORTAO의 입력·패스 계약](https://github.com/theagentd/CORTAO#integration-instructions)과 [Filament의 간접 조명 AO 결합](https://github.com/google/filament/blob/main/shaders/src/surface_light_indirect.fs)을 따릅니다. 방향광의 차폐는 광원 방향으로 계산한 그림자 가시성이 담당합니다. 스칼라 AO는 반구 전체의 가시성이므로 방향광 그림자를 대신하지 않습니다. PBR 반사를 추가할 때는 거칠기·시선·bent normal을 고려한 specular occlusion을 별도로 다뤄야 합니다. Lumen처럼 간접광 추적에 차폐가 포함되는 GI를 도입하면 같은 거리 범위의 AO를 다시 곱하지 않아야 합니다. [Lumen의 간접 조명과 sky shadowing](https://dev.epicgames.com/documentation/en-us/unreal-engine/lumen-global-illumination-and-reflections-in-unreal-engine).
+
+탐색 반경은 프레이밍 시 모델 AABB 대각선 대비 백분율입니다. 가까이 확대하면 참조 구현의 화면 높이 20% 반경 제한이 적용됩니다. 고정 난수 시드, 5×5 깊이·법선 기반 공간 필터로 노이즈와 실루엣 번짐을 줄입니다. TAA/모션 벡터가 없어 프레임 누적은 하지 않으며 카메라·모프·스키닝 변화에 즉시 대응합니다. 화면 밖·가려진 형상과 다중 투명 레이어는 표현하지 못합니다. Bent normal은 현재 조명에 사용하지 않습니다.
+
+설정은 `viewportCortao` 및 `.canvas`의 `viewport.cortao`로 저장합니다. 기존 `viewportGtao`/`viewport.gtao` 값은 CORTAO로 읽어 들이며, 새 키를 우선합니다. AO 필드가 전혀 없는 이전 작업은 꺼진 상태로 복원합니다. 동일한 강도·반경이라도 알고리즘 차이로 기존 GTAO와 음영이 달라질 수 있습니다.
+
+Debug View는 일반 색상 패스를 대체하여 AO 버퍼를 그대로 흑백 표시합니다. `AO만 보기`는 공간 필터 및 사용자 강도 적용 후, `필터 전 AO`는 두 처리 전의 가시성입니다. 두 뷰 모두 전체 해상도 AO 버퍼를 표시합니다. 배경은 회색, 개방은 흰색, 완전 차폐는 검정이고 GT7·노출·조명은 거치지 않습니다. 디버그에서 CORTAO를 끄면 법선·깊이만 갱신해 모델을 흰색으로 보여 주므로 이전 마스크가 남지 않습니다. 디버그 선택은 저장하지 않으며, 작업 복원과 기본값 복원 시 일반 렌더링으로 돌아갑니다.
+
+법선 패스는 각 재질의 map/alphaMap, UV 변환, 면 방향, 노멀·범프 맵, 스키닝·모프를 반영합니다. 블렌딩 재질은 최소 알파 0.5로 차폐를 근사하며, 불투명도가 0.5 미만인 재질·숨긴 재질·사용자 정의 셰이더·에디터 보조 형상은 차폐에서 제외합니다. 법선과 색상 패스는 같은 네이티브 재질 데이터를 사용합니다. 변위 맵과 사용자 GLSL 셰이더는 지원하지 않습니다.
 
 ## 검증
 
-`npm test` 후 `npm run test:ui`를 실행합니다. 실제 WebGL에서 다음을 확인합니다.
+`npm test`, `npm run test:dx12`, `npm run test:ui`, `npm run test:workspace`로 검증합니다. GPU/UI 테스트에는 Windows 11과 DX12 Ultimate GPU가 필요합니다.
 
-- sRGB 128 입력이 선형 약 0.21586으로 디코딩되며, 데이터 128은 약 0.50196으로 유지됩니다.
-- 투명 합성 결과가 선형 0.5이고, 불투명 선형 0.5와 같은 최종 출력을 만듭니다.
-- 1을 넘는 HDR 값이 중간 버퍼에 보존됩니다.
-- 흑색·중간 회색·원색·고휘도·최대 half-float 값 등 21개 샘플을 참조식으로 계산한 결과와 비교합니다. GPU 차이를 고려한 허용 오차는 최종 8비트 채널당 2입니다.
-- 리사이즈·DPI, PMX/FBX, Toon 두 톤과 그림자 합성을 확인합니다.
-- 6 lux에서 Lambert 흰색·18% 회색의 휘도, 광량 선형성, 입사각 코사인, 방향광의 거리 독립성, 0 lux를 확인합니다.
-- EV100 1단계와 보정 1단계의 상쇄, 노출과 물리 휘도의 분리, 발광+직접광 합산, sRGB 발광 텍스처, 모드별 발광, 원본 보존, 편집 도구 색상 유지를 확인합니다.
-- 네 언어와 영어 폴백에서 노출·발광 설정의 작업 저장/복원을 검증합니다.
+- DXR 그림자·반그림자, 알파 컷아웃과 얇은 면, DDS 압축 텍스처 업로드를 실제 GPU 픽셀로 비교합니다.
+- CORTAO의 간접광 차폐, 직접광·발광 보존, Debug View의 노출 독립성을 확인합니다.
+- 일반 화면과 AO 화면을 반복 전환하고 창 캡처를 검사해 공유 텍스처의 표시 갱신을 확인합니다.
+- Lambert/Toon, 아웃라인, PMX 모프, FBX 및 스키닝 애니메이션, 리사이즈·빈 장면과 오류 후 재시작을 검사합니다.
+- 재질·노출·발광·AO의 워크스페이스 저장/복원과 네 언어·영어 폴백을 검증합니다.

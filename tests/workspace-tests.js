@@ -12,6 +12,7 @@ export function sampleWorkspace() {
     browser: { directory: 'C:\\project\\models', filter: 'モデル', only3d: true },
     model: { path: 'C:\\project\\models\\캐릭터.pmx', materials: [{ name: '体', visible: false, emissiveNits: 250 }], morphs: [{ name: 'あ', weight: 0.5 }] },
     viewport: { exposure: { ev100: 2.5, compensation: 1 }, mode: 'toon', outline: { width: 2.7, color: '#ab3344' }, flags: { grid: false, skeleton: true, wireframe: false },
+      cortao: { enabled: true, intensity: 1, radius: 2 },
       lightIntensity: 12500.5, lightUnit: 'lux', ambientIntensity: 3.5, lightDirection: [1, 2, 3], shadowEnabled: true, shadowSoftness: 0.04, gizmo: true,
       gizmoSpace: 'world', gizmoMode: 'rotate', gizmoPosition: [1, 4, 5],
       camera: { position: [2, 4, 7], target: [0, 1, 0], up: [0, 1, 0], fov: 35, zoom: 1, near: 0.1, far: 100, maxDistance: 50 } },
@@ -21,6 +22,23 @@ export function sampleWorkspace() {
 }
 
 export function registerWorkspaceTests(test) {
+  test('workspace: CORTAO round-trips, old files remain disabled, invalid settings fail', () => {
+    const workspace = sampleWorkspace();
+    workspace.viewport.cortao = { enabled: true, intensity: 1.7, radius: 4.3 };
+    assert.deepEqual(validateWorkspace(workspace).viewport.cortao, workspace.viewport.cortao);
+    const migratedSettings = workspace.viewport.cortao;
+    delete workspace.viewport.cortao;
+    workspace.viewport.gtao = migratedSettings;
+    assert.deepEqual(validateWorkspace(workspace).viewport.cortao, migratedSettings);
+    assert.equal(validateWorkspace(workspace).viewport.gtao, undefined);
+    delete workspace.viewport.gtao;
+    assert.deepEqual(validateWorkspace(workspace).viewport.cortao, { enabled: false, intensity: 1, radius: 2 });
+    for (const bad of [null, { enabled: 'yes', intensity: 1, radius: 2 }, { enabled: true, intensity: NaN, radius: 2 },
+      { enabled: true, intensity: 2.1, radius: 2 }, { enabled: true, intensity: 1, radius: 0 }]) {
+      workspace.viewport.cortao = bad;
+      assert.throws(() => validateWorkspace(workspace));
+    }
+  });
   test('workspace: exposure and emission migration preserves the previous fixed output scale', () => {
     const old = sampleWorkspace();
     delete old.viewport.exposure; delete old.model.materials[0].emissiveNits;

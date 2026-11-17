@@ -19,6 +19,11 @@ files:
   - package.json
   - LICENSE
   - licenses/**/*
+  - '!node_modules/three/build/three.module*'
+  - '!node_modules/three/build/three.webgpu*'
+  - '!node_modules/three/build/three.tsl*'
+  - '!node_modules/three/src/renderers/webgl/**/*'
+  - '!node_modules/three/src/renderers/WebGLRenderer.js'
   # These are runtime modules, despite Three.js placing them under "examples".
   # An explicit FileSet bypasses the dependency copier's examples exclusion.
   - from: node_modules/three/examples/jsm
@@ -26,22 +31,22 @@ files:
     filter:
       - '**/*'
 # Sample workspace opened on the first launch. Kept outside app.asar, next to the executable
-# (Contents/Example on macOS), so the model and its textures stay ordinary files.
+# so the model and its textures stay ordinary files.
 extraFiles:
   - from: Example
     to: Example
+    filter:
+      - '**/*'
+  - from: out/dx12
+    to: native/dx12
+    filter:
+      - '*.exe'
+      - '*.cso'
+      - '*.bin'
 win:
   target: nsis
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-mac:
-  target: zip
-  category: public.app-category.graphics-design
-  identity: null
-linux:
-  target: AppImage
-  category: Graphics
-  maintainer: mazelines
 publish: null

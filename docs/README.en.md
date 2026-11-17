@@ -4,11 +4,22 @@
 
 A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD**. It combines a file browser, 3D viewer, and single-file or batch conversion. The app and CLI also use the name `MMD Converter`.
 
-![PMX model with soft shadows, materials, and morph controls](images/mmd-canvas-preview.png)
+![MMD Canvas 0.5.2 with the DX12 Ultimate viewport and bundled example](images/mmd-canvas-dx12-preview.png)
 
-> Screenshots illustrate features available in v0.2.0. The example model is not included in this repository.
+> Screenshot from v0.5.2. The installer includes the model, textures, and workspace under `Example`.
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
+
+## v0.5.2: DX12 Ultimate and reliable GPU presentation
+
+**Requires Windows 11 x64 and a DirectX 12 Ultimate GPU (feature level 12_2, DXR 1.1 or newer).** All 3D rendering uses native DX12; WebGL rendering has been removed. macOS and Linux builds are no longer distributed.
+
+- **GPU stalls fixed:** copy DX12 output to presentation-owned GPU storage before returning the source frame. Wait when three source surfaces are still retained instead of exhausting the shared-texture pool. GPU recovery and renderer reloads are handled.
+- **DXR soft shadows:** adjustable light size and 16/64/128 rays.
+- **CORTAO:** applied to indirect light in the Lambert/Toon material shader before EV100 and GT7. Material AO is combined using `min(materialAO, screenAO)`. Filtered and raw AO debug views are available. [Equations and frame order](native-dx12.md#cortao-합성식).
+- **Complete example and startup:** all 56 files under `Example` ship unchanged. Open `Zhuang Fangyi.canvas` when no valid previous workspace can be restored; otherwise restore the user's workspace. The bundled legacy workspace has no AO settings and opens with CORTAO disabled.
+
+Validation covers 1,200 frames of the real example with camera movement and window resizing, delayed consumer releases, GPU-process recovery, DXR/CORTAO, and output color preservation. [Requirements and limitations](native-dx12.md) · [Release notes](release-notes/v0.5.2.md).
 
 ## v0.5.0: ambient light and EV100
 
@@ -44,7 +55,7 @@ The app follows the system language at startup: **Korean, English, Simplified Ch
 
 Use the workspace bar to open, save, or save as a `.canvas` file. It restores the model and folder, camera, lighting, shading and outlines, material visibility, morphs, and conversion options/output paths. Folder-only batch workspaces are supported. Opening a workspace does not start conversion.
 
-Shortcuts: `Ctrl+S` to save, `Ctrl+Shift+S` to save as, and `Ctrl+Shift+O` to open (`Cmd` on macOS). You can also open `.canvas` files by drag and drop or as a startup argument. Assets are referenced, not embedded; preserve their relative folder structure when moving a workspace. Language is determined by the receiving system, not the workspace.
+Shortcuts: `Ctrl+S` to save, `Ctrl+Shift+S` to save as, and `Ctrl+Shift+O` to open. You can also open `.canvas` files by drag and drop or as a startup argument. Assets are referenced, not embedded; preserve their relative folder structure when moving a workspace. Language is determined by the receiving system, not the workspace.
 
 Run `npm run test:workspace` after `npm test` to verify saving/restoring and all four languages plus the English fallback in Electron.
 
@@ -56,10 +67,11 @@ Run `npm run test:workspace` after `npm test` to verify saving/restoring and all
 - **File browser:** browse drives and folders, filter by filename or 3D format, navigate with the keyboard, and drag and drop files.
 - **3D viewer:** orbit, pan, zoom, frame the model, toggle grid/bones/wireframe, and control material visibility.
 - **Rendering modes:** standard Lambert shading and two-tone Toon shading with adjustable outlines.
-- **Smooth-normal outlines:** vertices at the same position are grouped at runtime to calculate angle-weighted normals across UV seams and hard edges. Original surface normals are preserved. Outline normals are calculated on first use and reused until vertices or morphs change; no extra packed channel is required.
+- **Toon outlines:** the native DX12 hull pass uses the posed surface normals, with adjustable width and color.
+- **Animation playback:** when a loaded model carries animation clips (FBX, glTF/GLB, DAE, USD), a transport bar appears at the bottom of the viewport and playback starts. It offers play/pause, back to start, clip selection, timeline scrubbing, speed (0.25–2×), and looping; shadows and toon outlines follow the motion. PMX files contain no animation, so the bar stays hidden for them, and loading VMD motions is not supported.
 - **PMX inspection:** vertex, triangle, material, bone, morph, and texture counts; model descriptions and conversion warnings; vertex morph sliders and reset.
 - **Material inspector:** search material/mesh names; inspect color, opacity, roughness, metalness, texture previews, resolution, UV data, material slots, and triangle counts. View original PMX values separately. Toggle individual materials, isolate the selection, or show all, including on non-PMX models. Visibility changes affect previews only.
-- **Lighting and shadows:** light intensity and PCSS soft shadows with adjustable light size. A 4096 × 4096 shadow map is fitted to the model and refreshed when the model, materials, or light change.
+- **Lighting and shadows:** hardware DXR soft shadows with adjustable light size and 16/64/128 rays (default 64).
 - **Light gizmo:** translation, rotation, Local/World coordinates, and direction reset. Lighting, shadow, direction, and coordinate-space preferences are saved.
 - **Conversion:** single PMX files or entire folders, optional recursion, scale/name/morph/texture-copy options, and opening the output folder.
 
@@ -72,7 +84,7 @@ Use the **Lambert / Toon** sphere buttons at the top right of the viewport.
 | **Standard · Lambert** | Smooth lighting without Toon outlines; the default mode. | Inspecting shape, textures, and lighting |
 | **Simple Toon** | Two lighting tones and silhouette outlines. | Previewing cel shading and character silhouettes |
 
-Toon cast shadows share the unlit face's dark tone instead of darkening it again. Hemisphere fill is controlled by the ambient lux setting. Soft PCSS shadow edges interpolate between the two tones; source texture, emission, and AO variations remain visible.
+Toon cast shadows share the unlit face's dark tone instead of darkening it again. Hemisphere fill is controlled by the ambient lux setting. Soft DXR shadow edges interpolate between the two tones; source texture, emission, and AO variations remain visible.
 
 ![Simple Toon rendering with lux lighting, EV100 exposure, outlines, and workspace controls](images/mmd-canvas-toon-preview.png)
 
@@ -83,9 +95,17 @@ Selecting Toon reveals outline controls below the buttons:
 - **Reset:** the outline panel's ↺ button restores the default width and color.
 - **Persistence:** the mode and outline settings are restored on the next launch.
 
-These modes affect viewport previews only. They do not replace original material data or turn FBX/USD exports into Toon materials. Simple Toon does not fully reproduce original MMD toon/sphere materials; custom shader materials retain their own rendering.
+These modes affect viewport previews only. They do not replace original material data or turn FBX/USD exports into Toon materials. Simple Toon does not fully reproduce original MMD toon/sphere materials; custom GLSL shader materials are not supported.
 
 > Rendering modes and the material inspector are available from `v0.2.0`.
+
+## CORTAO contact shading
+
+Under **CORTAO → Debug View**, `AO only` shows filtered, intensity-adjusted visibility; `Raw AO` shows the calculation before filtering and intensity. Black is occluded, white is open, and the background is gray. Lighting, textures, and exposure do not affect these views. Choose `Normal rendering` to return. Debug selection is not saved in workspaces. When CORTAO is off, the model appears white and a message explains why.
+
+Both Lambert and Toon share the viewport's **CORTAO** controls: enabled, intensity (0–2), and radius (0.1–10% of model size). Defaults are on / 1 / 2%. CORTAO occludes ambient light in creases and contact areas; it has no effect at 0 lux ambient. Direct lighting, emission, and outlines keep their appearance.
+
+Daniel Isheden's CORTAO 1.0.3 HLSL runs at full resolution, with 32 samples / 32 rays. It follows camera, morph, and animation changes; off-screen geometry cannot occlude the model. Settings persist between sessions and in `.canvas`. Existing GTAO settings migrate to CORTAO; workspaces with no AO settings open with it disabled. Wireframe skips CORTAO. [Implementation and license](../renderer/vendor/cortao/README.md)
 
 ## Supported formats
 
@@ -99,15 +119,20 @@ General 3D formats use three.js loaders; extensions and material rendering may v
 
 ## Run
 
-Running from source requires **Node.js 24 or newer and npm**.
+Running from source requires **Windows 11 x64, Node.js 24+, Visual Studio C++ x64 tools and Windows SDK DXC**.
+
+The viewport uses **DirectX 12 Ultimate exclusively** on Windows 11 x64. A DX12 Ultimate GPU is required. DXR shadows, full-resolution CORTAO, MSAA and GPU shared-texture presentation run natively. Initialization errors are shown with a Retry button; there is no browser-renderer fallback. See [architecture and limitations](native-dx12.md).
 
 ```bash
 npm ci
+npm run build:dx12
 npm start
 npm start -- model.pmx    # Open a model at startup
 ```
 
-Downloads include a Windows x64 installer, macOS Apple Silicon/Intel ZIPs, and a Linux x64 AppImage. Current builds are unsigned and do not include in-app automatic updates.
+The supported desktop platform is Windows 11 x64. Builds are unsigned and do not include in-app automatic updates. The native renderer requires a DX12 Ultimate GPU.
+
+Shipping builds include every file from the local `Example` directory. Startup restores the last valid user workspace, or opens the installed `Example/Zhuang Fangyi/Zhuang Fangyi.canvas` when none is available. An explicitly opened file takes precedence. Old first-run flags do not suppress the example.
 
 ## Viewer controls
 
@@ -117,6 +142,7 @@ Downloads include a Windows x64 installer, macOS Apple Silicon/Intel ZIPs, and a
 | ↑ / ↓ in file list | Select and preview |
 | Enter / Backspace | Enter folder / go to parent |
 | F | Frame model |
+| Space | Play / pause animation (models with clips) |
 | Ctrl+O / Ctrl+E | Open file / convert PMX |
 | W / E | Translate / rotate light gizmo |
 | X or Local/World button | Switch gizmo coordinate space |
@@ -172,7 +198,7 @@ Generated fixtures and outputs in `tests/sample/` and `tests/out/` are ignored b
 
 ## CI/CD
 
-- Pushes and PRs to `main` run tests, Python syntax checks, and packaging checks on Windows, macOS, and Linux.
+- Pushes and PRs to `main` run tests, Python syntax checks, native DX12 compilation and packaging checks on Windows. Run `npm run test:dx12` locally on a DX12 Ultimate GPU.
 - Pushing a `v*` tag validates the version and builds four platform/architecture packages. Once all succeed, the workflow publishes a GitHub Release with SHA-256 checksums.
 - **Actions → Release → Run workflow**, with a branch selected, builds artifacts without publishing a release.
 - Dependabot checks npm and GitHub Actions updates weekly.
@@ -186,7 +212,7 @@ Built with JavaScript (ES modules), Electron, three.js, and HTML/CSS. Blender im
 ```text
 src/core/             PMX parser, scene normalization, FBX/USD writers, conversion pipeline
 electron/             Main process, preload, file access, IPC
-renderer/             Browser, viewer, PCSS shadows, light gizmo, materials, Toon shading
+renderer/             Browser, viewer, DXR shadows, light gizmo, materials, Toon shading
 cli.js                Command-line converter
 tests/                PMX/OBJ generators, core/UI tests, Blender validation
 .github/workflows/    CI and release automation

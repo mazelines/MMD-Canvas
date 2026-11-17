@@ -18,6 +18,8 @@ import { registerShadowTests } from './shadow-tests.js';
 import { registerMaterialTests } from './material-tests.js';
 import { registerShadingTests } from './shading-tests.js';
 import { registerWorkspaceTests } from './workspace-tests.js';
+import { registerAnimationTests } from './animation-tests.js';
+import { registerNativeRendererTests } from './native-renderer-tests.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 setLanguage('ko'); // Core diagnostics are asserted independently of the host locale.
@@ -33,6 +35,7 @@ function test(name, fn) {
     catch (e) { failed++; console.log(`  FAIL ${name}\n       ${String(e.message).split('\n').join('\n       ')}`); }
   });
 }
+registerNativeRendererTests(test);
 
 /** Minimal binary FBX reader: validates node framing and returns the node tree. */
 function readFbx(buf) {
@@ -267,6 +270,7 @@ registerShadowTests(test);
 registerMaterialTests(test);
 registerShadingTests(test);
 registerWorkspaceTests(test);
+registerAnimationTests(test, path.join(sampleDir, 'animated.gltf'));
 for (const run of pending) await run();
 
 if (process.argv.includes('--blender')) {

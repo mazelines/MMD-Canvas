@@ -1,4 +1,35 @@
-const { contextBridge, ipcRenderer, webUtils } = require('electron');
+const { contextBridge, ipcRenderer, webUtils, sharedTexture } = require('electron');
+const { GpuPresenter } = require('./gpu-presenter.cjs');
+const presenter = new GpuPresenter();
+
+if (sharedTexture) sharedTexture.setSharedTextureReceiver(async ({ importedSharedTexture }, id) => {
+  let frame;
+  try {
+    frame = importedSharedTexture.getVideoFrame();
+    const canvas = document.getElementById('dx12-canvas');
+    if (!canvas) throw new Error('DX12 viewport canvas is not available');
+    {
+      if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) { canvas.width = frame.displayWidth; canvas.height = frame.displayHeight; }
+      const context = canvas.getContext('2d', { alpha: false });
+      if (context.isContextLost()) throw new Error('Failed to present shared texture: GPU is not available');
+      const copied = await presenter.copy(frame);
+      frame.close(); frame = null;
+      context.drawImage(copied, 0, 0);
+      // Let Chromium submit this canvas before accepting another native frame.
+      // Without pacing, a burst of imports can outrun canvas submission and stall
+      // the shared-image command stream. The timer also covers an occluded window.
+      await new Promise(resolve => {
+        const timer = setTimeout(resolve, 100);
+        requestAnimationFrame(() => { clearTimeout(timer); resolve(); });
+      });
+      if (context.isContextLost()) throw new Error('Failed to present shared texture: GPU is not available');
+      canvas.dataset.frame = String(id);
+    }
+    ipcRenderer.send('dx12:presented', id, null);
+  } catch (error) {
+    ipcRenderer.send('dx12:presented', id, error.message || String(error));
+  } finally { frame?.close(); importedSharedTexture.release(); }
+});
 
 async function call(channel, ...args) {
   const r = await ipcRenderer.invoke(channel, ...args);
@@ -7,6 +38,11 @@ async function call(channel, ...args) {
 }
 
 contextBridge.exposeInMainWorld('api', {
+  dx12Start: () => call('dx12:start'),
+  dx12Model: (data) => call('dx12:model', data),
+  dx12Pose: (data) => call('dx12:pose', data),
+  dx12Render: (data) => call('dx12:render', data),
+  dx12Stop: () => call('dx12:stop'),
   startup: () => call('app:startup'),
   list: (dir) => call('fs:list', dir),
   drives: () => call('fs:drives'),

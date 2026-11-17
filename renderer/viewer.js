@@ -4,16 +4,15 @@ import { t } from '../src/i18n/index.js';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
 import { parsePmx } from '../src/core/pmx-parser.js';
 import { buildScene } from '../src/core/scene.js';
-import { SoftShadows } from './shadows.js';
 import { collectMaterials } from './material-info.js';
 import { ViewportShading } from './viewport-shading.js';
-import { LinearViewportPipeline } from './color-pipeline.js';
-import { DEFAULT_LIGHT_LUX, DEFAULT_AMBIENT_LUX, clampLightLux } from '../src/core/lighting.js';
+import { ViewportCORTAO } from './cortao.js';
+import { ModelAnimation, playableClips } from './animation.js';
+import { DEFAULT_LIGHT_LUX, DEFAULT_AMBIENT_LUX, clampLightLux, normalizeExposure, exposureScale } from '../src/core/lighting.js';
 
 export const VIEWABLE = ['.pmx', '.fbx', '.glb', '.gltf', '.obj', '.stl', '.ply', '.dae', '.3mf', '.usdz', '.usda', '.usd', '.usdc'];
 
@@ -27,20 +26,18 @@ const extname = (p) => { const m = /\.[^.\\/]+$/.exec(p); return m ? m[0].toLowe
 export class Viewer {
   constructor(container) {
     this.container = container;
-    this.renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.colorPipeline = new LinearViewportPipeline(this.renderer);
-    container.appendChild(this.renderer.domElement);
+    this.canvas = document.createElement('canvas');
+    this.canvas.id = 'dx12-canvas';
+    Object.assign(this.canvas.style, { position: 'absolute', inset: '0', width: '100%', height: '100%' });
+    container.appendChild(this.canvas);
+    this.exposure = normalizeExposure();
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x22252c);
-    const pmrem = new THREE.PMREMGenerator(this.renderer);
-    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    this.scene.environmentIntensity = 0;
-
     this.camera = new THREE.PerspectiveCamera(35, 1, 0.1, 5000);
     this.camera.position.set(0, 12, 40);
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.cortao = new ViewportCORTAO();
+    this.controls = new OrbitControls(this.camera, this.canvas);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.12;
     this.controls.addEventListener('change', () => this.requestRender());
@@ -52,12 +49,12 @@ export class Viewer {
     this.scene.add(this.hemi, this.sun);
 
     this.grid = new THREE.GridHelper(10, 10, 0x5a6070, 0x363a44);
-    this.colorPipeline.protectEditorObject(this.grid);
     this.scene.add(this.grid);
 
     this.root = new THREE.Group();
     this.scene.add(this.root);
-    this.current = null;        // { object, kind, pmx?, sceneData?, materials? }
+    this.current = null;        // { object, kind, pmx?, sceneData?, materials?, animation? }
+    this.onAnimationFrame = null; // (state) => void, after playback or a seek moved the pose
     this.renderMode = 'lambert';
     this.outlineSettings = { width: 1.6, color: '#151923' };
     this.skeleton = null;
@@ -65,10 +62,8 @@ export class Viewer {
     this.loadToken = 0;
     this.needsRender = true;
 
-    // PCSS soft shadows for the sun
-    this.shadows = new SoftShadows(this.renderer);
-    this.scene.add(this.shadows.ground);
-    this.shadow = { enabled: false, softness: 0.03, dirty: false };
+    // Directional visibility and the ground catcher are rendered by DXR.
+    this.shadow = { enabled: false, softness: 0.03, groundY: 0 };
     this.lightLevel = DEFAULT_LIGHT_LUX;
     this.ambientLevel = DEFAULT_AMBIENT_LUX;
 
@@ -76,14 +71,12 @@ export class Viewer {
     this.lightRig = makeSunIcon();
     this.lightRig.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), this.sun.position.clone().normalize());
     this.scene.add(this.lightRig);
-    this.lightControls = new TransformControls(this.camera, this.renderer.domElement);
+    this.lightControls = new TransformControls(this.camera, this.canvas);
     this.lightControls.setMode('rotate');
     this.lightControls.setSpace('local');
     this.lightControls.setSize(0.75);
     this.lightControls.attach(this.lightRig);
     this.lightGizmo = this.lightControls.getHelper();
-    this.colorPipeline.protectEditorObject(this.lightRig);
-    this.colorPipeline.protectEditorObject(this.lightGizmo);
     this.scene.add(this.lightGizmo);
     this.lightControls.addEventListener('dragging-changed', (ev) => { this.controls.enabled = !ev.value; });
     this.lightControls.addEventListener('change', () => this.requestRender());
@@ -93,27 +86,39 @@ export class Viewer {
 
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
+    let lastTick = performance.now();
     const tick = () => {
       requestAnimationFrame(tick);
+      const now = performance.now();
+      // A stalled or backgrounded window must not fast-forward the clip when it comes back.
+      const elapsed = Math.min((now - lastTick) / 1000, 0.1);
+      lastTick = now;
+      if (this.current?.animation?.advance(elapsed)) this.animationChanged();
       const changed = this.controls.update() || this.needsRender;
       this.needsRender = false;
       if (!changed) return;
-      this.current?.shading?.updateOutlines();
-      if (this.shadow.enabled && this.current && this.shadow.dirty) this.updateShadowMap();
-      this.colorPipeline.render(this.scene, this.camera);
+      this.dx12?.request();
     };
     tick();
   }
 
   requestRender() { this.needsRender = true; }
 
+  setCortao(settings) {
+    this.cortao.configure(settings);
+    this.requestRender();
+  }
+
+  setCortaoDebug(view) {
+    this.cortao.setDebugView(view);
+    this.requestRender();
+  }
+
   setRenderMode(mode) {
     if (!['lambert', 'toon'].includes(mode)) return;
     this.renderMode = mode;
     if (this.current) {
       this.current.shading.apply(mode);
-      for (const binding of this.current.shading.bindings) if (binding.hull) this.colorPipeline.protectEditorObject(binding.hull);
-      this.shadows.patch(this.current.object);
     }
     this.setLightIntensity(this.lightLevel);
     this.invalidateShadows();
@@ -147,10 +152,10 @@ export class Viewer {
     this.requestRender();
   }
 
-  get exposure() { return this.colorPipeline.exposure; }
+  get exposureMultiplier() { return exposureScale(this.exposure.ev100, this.exposure.compensation); }
 
   setExposure(ev100, compensation = 0) {
-    this.colorPipeline.setExposure(ev100, compensation);
+    this.exposure = normalizeExposure(ev100, compensation);
     this.requestRender();
   }
 
@@ -164,6 +169,51 @@ export class Viewer {
     if (!source) return;
     this.current.shading.setEmission(source, nits);
     this.requestRender();
+  }
+
+  // ---------- animation ----------
+  /** @returns {object|null} clips and playback state, or null when the model has no animation */
+  getAnimation() { return this.current?.animation?.state() ?? null; }
+
+  /** The pose moved: shadows follow it, and the transport UI shows the new time. */
+  animationChanged() {
+    this.nativeRevision = (this.nativeRevision || 0) + 1;
+    this.requestRender();
+    this.onAnimationFrame?.(this.current.animation.state());
+  }
+
+  setAnimationPlaying(playing) {
+    const animation = this.current?.animation;
+    if (!animation) return;
+    if (playing) animation.play(); else animation.pause();
+    this.animationChanged();
+  }
+
+  seekAnimation(time) {
+    const animation = this.current?.animation;
+    if (!animation) return;
+    animation.seek(time);
+    this.animationChanged();
+  }
+
+  setAnimationClip(index) {
+    const animation = this.current?.animation;
+    if (!animation?.select(index)) return;
+    this.animationChanged();
+  }
+
+  setAnimationLoop(loop) {
+    const animation = this.current?.animation;
+    if (!animation) return;
+    animation.loop = !!loop;
+    this.animationChanged();
+  }
+
+  setAnimationSpeed(speed) {
+    const animation = this.current?.animation;
+    if (!animation) return;
+    animation.setSpeed(speed);
+    this.animationChanged();
   }
 
   // ---------- light direction ----------
@@ -180,8 +230,6 @@ export class Viewer {
   syncLightFromRig(notify) {
     const d = new THREE.Vector3(0, 0, 1).applyQuaternion(this.lightRig.quaternion).normalize();
     this.sun.position.copy(d);
-    this.shadows.setLight(d, this.shadow.softness);
-    this.shadow.dirty = true;
     if (notify) this.onLightDirection?.(d.toArray());
     this.requestRender();
   }
@@ -205,54 +253,29 @@ export class Viewer {
     this.requestRender();
   }
 
-  /** Average milliseconds per frame, shadow map included (forces the GPU to finish each one). */
-  benchmark(frames = 20) {
-    const gl = this.renderer.getContext();
-    const px = new Uint8Array(4);
-    const run = () => {
-      this.current?.shading?.updateOutlines();
-      if (this.shadow.enabled && this.current) this.updateShadowMap();
-      this.colorPipeline.render(this.scene, this.camera);
-      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-    };
-    run(); run();
-    const t = performance.now();
-    for (let i = 0; i < frames; i++) run();
-    const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
-    return { msPerFrame: +((performance.now() - t) / frames).toFixed(2), width: size.x, height: size.y, lost: gl.isContextLost() };
-  }
+  /** Native command recording and GPU completion time, excluding presentation. */
+  benchmark() { return this.dx12?.lastFrame ?? null; }
 
   // ---------- shadows ----------
   setShadows(enabled) {
     this.shadow.enabled = enabled;
-    this.shadow.dirty = true;
-    this.shadows.setEnabled(enabled);
     this.setLightIntensity(this.lightLevel);
   }
 
   /** @param {number} radius tan of the light's angular radius (0 = hard shadows) */
   setShadowSoftness(radius) {
     this.shadow.softness = radius;
-    this.shadows.setLight(this.sun.position, radius);
     this.requestRender();
   }
 
-  /** The shadow map no longer matches the model (morph, material visibility, late texture, light). */
+  /** Rebuild native geometry after a pose, visibility or material change. */
   invalidateShadows() {
-    this.shadow.dirty = true;
+    this.nativeRevision = (this.nativeRevision || 0) + 1;
     this.requestRender();
-  }
-
-  updateShadowMap() {
-    this.shadow.dirty = false;
-    this.shadows.setLight(this.sun.position, this.shadow.softness);
-    this.shadows.renderMap(this.current.object);
   }
 
   resize() {
     const w = this.container.clientWidth || 1, h = this.container.clientHeight || 1;
-    this.renderer.setSize(w, h);
-    this.colorPipeline.resize();
     this.current?.shading?.viewport.set(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
@@ -261,9 +284,10 @@ export class Viewer {
 
   clear() {
     if (this.skeleton) { this.scene.remove(this.skeleton); disposeObject(this.skeleton); this.skeleton = null; }
-    if (this.current) { this.current.shading?.dispose(); this.root.remove(this.current.object); disposeObject(this.current.object); this.current = null; }
-    this.shadows.clear();
-    this.shadow.dirty = false;
+    if (this.current) { this.current.animation?.dispose(); this.current.shading?.dispose(); this.root.remove(this.current.object); disposeObject(this.current.object); this.current = null; }
+    this.cortao.clear();
+    this.shadow.groundY = 0;
+    this.dx12?.clearError();
     this.requestRender();
   }
 
@@ -281,12 +305,17 @@ export class Viewer {
     loaded.info.materialNames = loaded.materials.map((entry) => entry.name);
     loaded.shading = new ViewportShading(loaded.object, new THREE.Vector2(this.container.clientWidth || 1, this.container.clientHeight || 1), this.outlineSettings);
     loaded.shading.apply(this.renderMode);
-    for (const binding of loaded.shading.bindings) if (binding.hull) this.colorPipeline.protectEditorObject(binding.hull);
     this.root.add(loaded.object);
-    this.shadows.patch(loaded.object);
+    const clips = playableClips(loaded.clips);
+    if (clips.length) {
+      loaded.animation = new ModelAnimation(loaded.object, clips); // poses the model at the first frame
+      loaded.animation.play();
+    }
+    loaded.info.animations = clips.length;
     this.applyFlags();
     this.frame();
     this.invalidateShadows();
+    if (this.dx12 && !this.dx12.enabled) void this.dx12.start();
     const info = { ...loaded.info, ...countGeometry(loaded.object) };
     loaded.info = info;
     return info;
@@ -415,11 +444,10 @@ export class Viewer {
       }
     });
     pos.needsUpdate = true;
-    // Morph edits change both culling bounds and the tightly fitted shadow projection.
+    // Morph edits change geometry bounds and native ray-tracing geometry.
     // Refresh them without calling frame(), which would reset the user's camera.
     c.object.geometry.computeBoundingBox();
     c.object.geometry.computeBoundingSphere();
-    this.shadows.fit(new THREE.Box3().setFromObject(c.object));
     this.invalidateShadows();
     this.requestRender();
   }
@@ -440,7 +468,7 @@ export class Viewer {
     manager.addHandler(/\.tga$/i, new TGALoader(manager));
     manager.addHandler(/\.dds$/i, new DDSLoader(manager));
     manager.onLoad = () => this.refreshMaterialTextures();
-    let object;
+    let object, clips;
     const basic = () => new THREE.MeshStandardMaterial({ color: 0xb8bcc6, roughness: 0.7, metalness: 0.05 });
     switch (ext) {
       case '.fbx': {
@@ -450,7 +478,9 @@ export class Viewer {
       }
       case '.glb': case '.gltf': {
         const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
-        object = (await new GLTFLoader(manager).loadAsync(url)).scene;
+        const gltf = await new GLTFLoader(manager).loadAsync(url);
+        object = gltf.scene;
+        clips = gltf.animations;
         break;
       }
       case '.obj': {
@@ -508,6 +538,7 @@ export class Viewer {
     return {
       kind: 'generic',
       object,
+      clips: clips || object.animations, // FBX, Collada and USD attach their clips to the root
       info: {
         kind: 'generic',
         name: filePath.replace(/^.*[\\/]/, ''),
@@ -531,6 +562,7 @@ export class Viewer {
     if (box.isEmpty()) return;
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
+    this.cortao.fit(box);
     const radius = Math.max(size.length() / 2, 1e-4);
     const fov = THREE.MathUtils.degToRad(this.camera.fov);
     const dist = (radius / Math.sin(fov / 2)) * 1.08;
@@ -548,12 +580,10 @@ export class Viewer {
     const step = Math.pow(10, Math.floor(Math.log10(Math.max(size.x, size.y, size.z) / 4 || 1)));
     const cells = Math.max(10, Math.ceil((Math.max(size.x, size.z) * 2.5) / step / 2) * 2);
     this.grid = new THREE.GridHelper(step * cells, cells, 0x5a6070, 0x363a44);
-    this.colorPipeline.protectEditorObject(this.grid);
     this.grid.position.set(Math.round(center.x / step) * step, box.min.y, Math.round(center.z / step) * step);
     this.grid.visible = this.flags.grid;
     this.scene.add(this.grid);
-    this.shadows.fit(box);
-    this.shadow.dirty = true;
+    this.shadow.groundY = box.min.y;
     this.lightRig.position.set(box.min.x - radius * 0.25, box.max.y, center.z);
     this.lightRig.scale.setScalar(radius * 0.09);
     this.buildSkeleton(radius);
@@ -591,7 +621,6 @@ export class Viewer {
     group.traverse((o) => { o.renderOrder = 999; });
     group.visible = this.flags.skeleton;
     this.skeleton = group;
-    this.colorPipeline.protectEditorObject(group);
     this.scene.add(group);
     void radius;
   }

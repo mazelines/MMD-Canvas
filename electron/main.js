@@ -6,8 +6,11 @@ import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { convertPmxFile, OUTPUT_FORMATS } from '../src/core/convert.js';
 import { readWorkspace, writeWorkspace, networkPaths } from '../src/core/workspace.js';
+import { Dx12Host } from './dx12.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// Three.js supplies scene/loader data only; browser 3D rendering is disabled.
+app.commandLine.appendSwitch('disable-webgl');
 
 // Test hooks: MMDCONV_OPEN=<file> opens a model at startup, MMDCONV_SHOT=<png> saves a screenshot and quits.
 const fileFromArgv = (argv) => argv.slice(1).find((a) => /\.(canvas|[a-z0-9]{2,5})$/i.test(a) && !a.startsWith('-') && !/\.(cjs|mjs|js)$/i.test(a)) || null;
@@ -22,6 +25,12 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let win = null;
+const dx12 = new Dx12Host(ROOT, () => win);
+app.on('before-quit', () => dx12.stop());
+app.on('child-process-gone', (_event, details) => {
+  if (details.type === 'GPU') dx12.logPresentation('gpu-process-exit', { reason: details.reason, exitCode: details.exitCode });
+});
+ipcMain.on('dx12:presented', (event, id, error) => dx12.presented(event.sender, id, error));
 // Display language the user chose in the OS (the system locale is only the regional format on Windows).
 const systemLanguage = () => process.env.MMDCONV_LOCALE || app.getPreferredSystemLanguages?.()[0] || app.getSystemLocale();
 // One window per user: opening another file (e.g. double-clicking a .canvas) reuses the running app.
@@ -128,6 +137,7 @@ function createWindow() {
       preload: path.join(ROOT, 'electron', 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false, // sharedTexture's renderer API is exposed only through the narrow preload bridge.
     },
   });
   Menu.setApplicationMenu(buildMenu());
@@ -145,6 +155,9 @@ function createWindow() {
 
 app.whenReady().then(() => {
   if (!hasInstanceLock) return;
+  if (process.platform !== 'win32' || Number(os.release().split('.')[2]) < 22000) {
+    dialog.showErrorBox('MMD Canvas', 'Windows 11 x64 이상이 필요합니다.'); app.quit(); return;
+  }
   setLanguage(systemLanguage());
   protocol.handle('app', async (request) => {
     try {
@@ -173,6 +186,11 @@ const handle = (channel, fn) => ipcMain.handle(channel, async (_e, ...args) => {
   try { return { ok: true, value: await fn(...args) }; }
   catch (e) { return { ok: false, error: e.message || String(e) }; }
 });
+handle('dx12:start', () => dx12.start());
+handle('dx12:model', data => dx12.model(data));
+handle('dx12:pose', data => dx12.pose(data));
+handle('dx12:render', data => dx12.render(data));
+handle('dx12:stop', () => dx12.stop());
 
 handle('app:startup', async () => {
   rendererReady = true;
@@ -317,6 +335,8 @@ ipcMain.on('viewer:loaded', async (_e, info) => {
   if (!SHOT_PATH) return;
   console.log('[loaded]', JSON.stringify(info));
   await new Promise((r) => setTimeout(r, Number(process.env.MMDCONV_SHOT_DELAY || 1500)));
+  const viewportState = await win.webContents.executeJavaScript(`JSON.stringify({workspace:document.getElementById('workspace-name').title,backend:document.getElementById('renderer-status').textContent,frame:window.__viewer?.dx12?.lastFrame?.id,error:document.getElementById('renderer-error').hidden?null:document.getElementById('renderer-error').innerText})`);
+  console.log('[viewport]', viewportState);
   const dom = await win.webContents.executeJavaScript("document.getElementById('convert-result').hidden ? '' : document.getElementById('convert-result').innerText");
   if (dom) console.log('[convert-result]', dom);
   if (process.env.MMDCONV_KEYS) { // e.g. "KeyW": send key presses to the page before the screenshot
@@ -326,7 +346,7 @@ ipcMain.on('viewer:loaded', async (_e, info) => {
     await new Promise((r) => setTimeout(r, 300));
   }
   if (process.env.MMDCONV_BENCH) {
-    const bench = await win.webContents.executeJavaScript('JSON.stringify([window.__viewer.benchmark(30), window.__viewer.shadows.coverage])');
+    const bench = await win.webContents.executeJavaScript('JSON.stringify(window.__viewer.benchmark())');
     console.log('[bench]', bench);
     await new Promise((r) => setTimeout(r, 500));
   }

@@ -21,7 +21,7 @@ export function registerMaterialTests(test) {
     viewer.setMaterialVisible(0, false);
     assert.equal(first.visible, false);
     assert.equal(second.visible, true);
-    assert.equal(viewer.shadow.dirty, true);
+    assert.equal(viewer.nativeRevision, 1);
   });
 
   test('materials: group, draw range and instance counts reflect rendered triangles', () => {

@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { MAX_LIGHT_LUX, legacyLightToLux, LEGACY_EV100, MIN_EV100, MAX_EV100, MAX_EXPOSURE_COMPENSATION, MAX_EMISSIVE_NITS } from './lighting.js';
+import { DEFAULT_CORTAO } from './ambient-occlusion.js';
 
 export const WORKSPACE_FORMAT = 'mmd-canvas-workspace';
 // 1: light as a 0..3 multiplier (some v1 files already carry lux + exposure). 2: photometric units.
@@ -29,11 +30,16 @@ export function validateWorkspace(value) {
   const c = object(d.conversion, 'conversion'), i = object(d.inspector, 'inspector');
   const camera = object(v.camera, 'camera'), outline = object(v.outline, 'outline'), flags = object(v.flags, 'flags');
   const exposure = v.exposure === undefined ? { ev100: LEGACY_EV100, compensation: 0 } : object(v.exposure, 'exposure');
+  // Migrate the previous GTAO controls; pre-AO workspaces keep occlusion disabled.
+  const savedAo = v.cortao === undefined ? v.gtao : v.cortao;
+  const cortao = savedAo === undefined ? { ...DEFAULT_CORTAO, enabled: false } : object(savedAo, 'cortao');
   const result = {
     format: WORKSPACE_FORMAT, version: WORKSPACE_VERSION,
     browser: { directory: nullablePath(b.directory, 'directory'), filter: string(b.filter, 'filter', 4096), only3d: bool(b.only3d, 'only3d') },
     model: null,
     viewport: {
+      cortao: { enabled: bool(cortao.enabled, 'cortao.enabled'), intensity: number(cortao.intensity, 'cortao.intensity', 0, 2),
+        radius: number(cortao.radius, 'cortao.radius', 0.1, 10) },
       exposure: { ev100: number(exposure.ev100, 'exposure.ev100', MIN_EV100, MAX_EV100),
         compensation: number(exposure.compensation, 'exposure.compensation', -MAX_EXPOSURE_COMPENSATION, MAX_EXPOSURE_COMPENSATION) },
       mode: choice(v.mode, 'mode', ['lambert', 'toon']),
