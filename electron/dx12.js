@@ -96,7 +96,7 @@ export class Dx12Host {
   async model(bytes) { if (!(bytes instanceof ArrayBuffer) || bytes.byteLength > 512 * 1024 * 1024) throw new Error('Invalid native model packet'); return this.request('model', 1, bytes); }
   async pose(bytes) { if (!(bytes instanceof ArrayBuffer) || bytes.byteLength > 160 * 1024 * 1024) throw new Error('Invalid native pose packet'); return this.request('pose', 5, bytes); }
   async render(bytes) {
-    if (!(bytes instanceof ArrayBuffer) || bytes.byteLength !== 292) throw new Error('Invalid native frame packet');
+    if (!(bytes instanceof ArrayBuffer) || bytes.byteLength !== 308) throw new Error('Invalid native frame packet');
     // Backpressure: the native command loop must stay free to receive release
     // messages instead of allocating more surfaces or exiting on pool exhaustion.
     const owner = this.child;

@@ -10,6 +10,12 @@ A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
 
+## v0.5.6: grid quality and NVIDIA sharpening
+
+Fix broken and flickering grid lines at shallow camera angles. Filter lines using their projected footprint at output resolution, fade densely spaced distant lines, and smooth the grid boundary. The grid starts disabled, including in the bundled first-launch workspace. Transparent materials now have yellow checkboxes in the material list.
+
+Add NVIDIA NIS NVSharpen with a 0–100% strength control, defaulting to 25%. It works with DLAA, DLSS and MSAA, remembers the local preference, and skips the pass at 0%. Sharpening can amplify residual temporal fluctuation. [Implementation and limitations (Korean)](dlss.md) · [0.5.6 release notes](release-notes/v0.5.6.md).
+
 ## v0.5.5: DLAA and DLSS
 
 NVIDIA DLAA is the default AA, with DLSS Quality, DLSS Balanced and MSAA 4× options. Lambert and Toon reconstruct HDR color using depth and motion vectors before EV100 and GT7. DLAA/SR support RTX 20-series and newer; the app queries actual GPU/driver availability. Unsupported GPUs use DX12 MSAA 4×.

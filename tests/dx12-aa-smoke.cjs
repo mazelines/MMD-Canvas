@@ -45,7 +45,9 @@ app.on('browser-window-created',(_event,win)=>win.webContents.once('did-finish-l
     for(const mode of [0,1,2,3]) {
       const result=await win.webContents.executeJavaScript(`(async()=>{
         const v=__viewer,times=[];let frame;
-        const draw=async()=>{const data=v.dx12.frame(),f=new Float32Array(data,4);f[44]=1280;f[45]=900;f[67]=${mode};return api.dx12Render(data)};
+        // Reconstruction gate: measure reconstruction alone. Sharpening amplifies
+        // residual temporal fluctuation and has its own budget below.
+        const draw=async()=>{const data=v.dx12.frame(),f=new Float32Array(data,4);f[44]=1280;f[45]=900;f[67]=${mode};f[72]=0;return api.dx12Render(data)};
         for(let i=0;i<44;i++){frame=await draw();if(i>=32)times.push(frame.renderMs);}
         const c=document.getElementById('dx12-canvas'),ctx=c.getContext('2d'),a=ctx.getImageData(0,0,c.width,c.height).data;
         frame=await draw();const b=ctx.getImageData(0,0,c.width,c.height).data;let sum=0,max=0;
@@ -60,10 +62,46 @@ app.on('browser-window-created',(_event,win)=>win.webContents.once('did-finish-l
       fs.writeFileSync(`tests/out/dlss/mode-${mode}.png`,Buffer.from(result.png.split(',')[1],'base64'));delete result.png;
       results.push(result);console.log('DLSS mode:',JSON.stringify(result));
     }
+    const sharpen=await win.webContents.executeJavaScript(`(async()=>{
+      const v=__viewer,records=[];let base=null;
+      for(const amount of [0,50,100]){
+        let frame;const draw=async()=>{const data=v.dx12.frame(),f=new Float32Array(data,4);f[44]=1280;f[45]=900;f[67]=1;f[72]=amount/100;return api.dx12Render(data)};
+        for(let i=0;i<44;i++)frame=await draw();
+        const c=document.getElementById('dx12-canvas'),pixels=c.getContext('2d').getImageData(0,0,c.width,c.height).data;
+        let mean=0;if(base){let sum=0;for(let i=0;i<pixels.length;i+=4)for(let j=0;j<3;j++)sum+=Math.abs(pixels[i+j]-base[i+j]);mean=sum/(pixels.length*0.75)}else base=pixels;
+        records.push({amount,frame,mean,png:c.toDataURL('image/png')});
+      }
+      return records;
+    })()`);
+    for(const record of sharpen){
+      assert.equal(record.frame.sharpen,record.amount);
+      assert.equal(record.frame.antialiasing,'DLAA');
+      assert.equal(record.frame.aaAccumulating,false);
+      fs.writeFileSync(`tests/out/dlss/sharpen-${record.amount}.png`,Buffer.from(record.png.split(',')[1],'base64'));delete record.png;
+    }
+    assert.ok(sharpen[1].mean>0&&sharpen[2].mean>sharpen[1].mean,'Sharpening must scale with strength on the real model: '+JSON.stringify(sharpen.map(r=>({amount:r.amount,mean:r.mean}))));
+    console.log('DLSS sharpen:',JSON.stringify(sharpen.map(({amount,mean,frame})=>({amount,mean,renderMs:frame.renderMs}))));
+    // Sharpened static output: NVSharpen amplifies residual reconstruction
+    // fluctuation (~2x at 50%), so the sharpen-inclusive temporal budget is
+    // separate from the reconstruction gate above.
+    const sharpenStability=[];
+    for(const mode of [1,2,3]) {
+      const result=await win.webContents.executeJavaScript(`(async()=>{
+        const v=__viewer;const draw=async()=>{const data=v.dx12.frame(),f=new Float32Array(data,4);f[44]=1280;f[45]=900;f[67]=${mode};f[72]=0.5;return api.dx12Render(data)};
+        for(let i=0;i<44;i++)await draw();
+        const c=document.getElementById('dx12-canvas'),ctx=c.getContext('2d'),a=ctx.getImageData(0,0,c.width,c.height).data;
+        await draw();const b=ctx.getImageData(0,0,c.width,c.height).data;let sum=0,max=0;
+        for(let i=0;i<a.length;i+=4)for(let j=0;j<3;j++){const d=Math.abs(a[i+j]-b[i+j]);sum+=d;max=Math.max(max,d);}
+        return{mode:${mode},mean:sum/(a.length/4*3),max};
+      })()`);
+      assert.ok(result.mean<0.3,'Sharpened static output must stay within the temporal amplification budget: '+JSON.stringify(result));
+      sharpenStability.push(result);
+    }
+    console.log('DLSS sharpen stability:',JSON.stringify(sharpenStability));
     const cases=await win.webContents.executeJavaScript(`(async()=>{const {runAACases}=await import('../tests/dx12-aa-cases.js');return runAACases(__viewer)})()`);
     console.log('DLSS reconstruction cases:',JSON.stringify(cases));
     const fallback=await missingRuntimeFallback(win);console.log('Missing DLSS runtime fallback:',fallback.antialiasing);
-    fs.writeFileSync('tests/out/dlss/results.json',JSON.stringify({startup,results,cases,fallback},null,2));
+    fs.writeFileSync('tests/out/dlss/results.json',JSON.stringify({startup,results,sharpen,sharpenStability,cases,fallback},null,2));
     clearTimeout(timeout);app.quit();
   }catch(error){console.error(error);clearTimeout(timeout);app.exit(1)}
 }));

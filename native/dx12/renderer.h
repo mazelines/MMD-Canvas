@@ -7,6 +7,7 @@
 #include <cstring>
 #include <limits>
 #include "dlss.h"
+#include "NIS_Config.h"
 
 struct NativeVertex { float p[3], n[3], uv[2]; };
 struct NativeTriangle { uint32_t a,b,c,material; };
@@ -20,17 +21,17 @@ struct Reader {
 struct NativeRenderer {
     Device& d; std::filesystem::path directory; HANDLE parent = nullptr, remoteHandle = nullptr;
     Dlss dlss;
-    ComPtr<ID3D12RootSignature> root;
+    ComPtr<ID3D12RootSignature> root, nisRoot;
     ComPtr<ID3D12DescriptorHeap> descriptors, rtvs, dsvs;
-    ComPtr<ID3D12PipelineState> normalPso, colorPso, transparentPso, outlinePso, wirePso, packPso, mipPso, aoPso, outputPso;
+    ComPtr<ID3D12PipelineState> normalPso, colorPso, transparentPso, outlinePso, wirePso, packPso, mipPso, aoPso, outputPso, sharpenPso;
     ComPtr<ID3D12PipelineState> shadowTracePso, shadowTemporalPso, shadowSpatialPso, shadowFinalPso;
     ComPtr<ID3D12PipelineState> aaColorPso, aaTransparentPso, aaOutlinePso, aaPreparePso;
-    ComPtr<ID3D12Resource> aaOutput, aaMotion, aaDepth, aaExposure;
+    ComPtr<ID3D12Resource> aaOutput, aaMotion, aaDepth, aaExposure, composite, nisConfig;
     ComPtr<ID3D12Resource> vertexBuffer, triangleBuffer, materialBuffer, indexBuffer, blas, tlas, scratch, instances, constants;
     ComPtr<ID3D12Resource> normal, depth, hdr, hdrMs, depthMs, packedBuffer, aoTexture, sharedOutput, lut;
     ComPtr<ID3D12Resource> previousVertexBuffer, motion, shadowRawTexture, shadowGuideTexture;
     std::array<ComPtr<ID3D12Resource>,2> surfaces, shadowHistories, shadowFilters;
-    std::array<float,72> previousFrame{};
+    std::array<float,76> previousFrame{};
     uint32_t shadowIndex=0, samplingFrame=0, stableFrames=0;
     bool historyValid=false, poseChanged=false;
     bool aaHistoryValid=false;
@@ -50,7 +51,7 @@ struct NativeRenderer {
     explicit NativeRenderer(Device& device, const std::filesystem::path& dir, DWORD parentPid) : d(device), directory(dir), dlss(device,dir) {
         parent = OpenProcess(PROCESS_DUP_HANDLE, FALSE, parentPid);
         if (!parent) throw std::runtime_error("Cannot share textures with the host process");
-        D3D12_DESCRIPTOR_HEAP_DESC h{}; h.NumDescriptors = 173; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV; h.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        D3D12_DESCRIPTOR_HEAP_DESC h{}; h.NumDescriptors = 174; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV; h.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
         check(d.device->CreateDescriptorHeap(&h, IID_PPV_ARGS(&descriptors)), "Create descriptors");
         descriptorSize = d.device->GetDescriptorHandleIncrementSize(h.Type);
         h = {}; h.NumDescriptors = 7; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
@@ -58,7 +59,7 @@ struct NativeRenderer {
         h.NumDescriptors = 2; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
         check(d.device->CreateDescriptorHeap(&h, IID_PPV_ARGS(&dsvs)), "Create depth view");
         D3D12_DESCRIPTOR_RANGE ranges[2]{};
-        ranges[0] = {D3D12_DESCRIPTOR_RANGE_TYPE_SRV,148,0,0,0}; ranges[1] = {D3D12_DESCRIPTOR_RANGE_TYPE_UAV,13,0,0,0};
+        ranges[0] = {D3D12_DESCRIPTOR_RANGE_TYPE_SRV,149,0,0,0}; ranges[1] = {D3D12_DESCRIPTOR_RANGE_TYPE_UAV,14,0,0,0};
         D3D12_ROOT_PARAMETER params[4]{};
         params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV; params[0].Descriptor.ShaderRegister = 0;
         params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS; params[1].Constants = {1,0,4};
@@ -69,6 +70,25 @@ struct NativeRenderer {
         D3D12_ROOT_SIGNATURE_DESC sig{4,params,2,samplers,D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT};
         ComPtr<ID3DBlob> blob,error; check(D3D12SerializeRootSignature(&sig,D3D_ROOT_SIGNATURE_VERSION_1,&blob,&error),"Serialize root signature");
         check(d.device->CreateRootSignature(0,blob->GetBufferPointer(),blob->GetBufferSize(),IID_PPV_ARGS(&root)),"Create root signature");
+        // NVSharpen (NIS SDK, MIT) keeps its own b0/t0/u0/s0 layout. A dedicated
+        // root signature reuses the shared descriptor heap: t0 -> composite SRV
+        // (slot 148), u0 -> shared output UAV (slot 162), plus a linear-clamp
+        // sampler the main signature does not have. Block geometry is fixed at
+        // the SDK's NVSharpen defaults and must match the build defines.
+        D3D12_DESCRIPTOR_RANGE nisRanges[2]{};
+        nisRanges[0]={D3D12_DESCRIPTOR_RANGE_TYPE_SRV,1,0,0,0};nisRanges[1]={D3D12_DESCRIPTOR_RANGE_TYPE_UAV,1,0,0,0};
+        D3D12_ROOT_PARAMETER nisParams[3]{};
+        nisParams[0].ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;nisParams[0].Descriptor.ShaderRegister=0;
+        nisParams[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;nisParams[1].DescriptorTable={1,&nisRanges[0]};
+        nisParams[2].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;nisParams[2].DescriptorTable={1,&nisRanges[1]};
+        D3D12_STATIC_SAMPLER_DESC nisSampler{};
+        nisSampler.Filter=D3D12_FILTER_MIN_MAG_MIP_LINEAR;nisSampler.AddressU=nisSampler.AddressV=nisSampler.AddressW=D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        nisSampler.MaxAnisotropy=1;nisSampler.ComparisonFunc=D3D12_COMPARISON_FUNC_ALWAYS;nisSampler.MaxLOD=D3D12_FLOAT32_MAX;nisSampler.ShaderVisibility=D3D12_SHADER_VISIBILITY_ALL;
+        D3D12_ROOT_SIGNATURE_DESC nisSig{3,nisParams,1,&nisSampler,D3D12_ROOT_SIGNATURE_FLAG_NONE};
+        ComPtr<ID3DBlob> nisBlob,nisError;check(D3D12SerializeRootSignature(&nisSig,D3D_ROOT_SIGNATURE_VERSION_1,&nisBlob,&nisError),"Serialize NIS root signature");
+        check(d.device->CreateRootSignature(0,nisBlob->GetBufferPointer(),nisBlob->GetBufferSize(),IID_PPV_ARGS(&nisRoot)),"Create NIS root signature");
+        {auto code=shader("nis-sharpen");D3D12_COMPUTE_PIPELINE_STATE_DESC p{};p.pRootSignature=nisRoot.Get();p.CS={code.data(),code.size()};check(d.device->CreateComputePipelineState(&p,IID_PPV_ARGS(&sharpenPso)),"nis-sharpen");}
+        nisConfig=buffer(sizeof(NISConfig),D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
         normalPso = graphics("normalMain", false, true); colorPso = graphics("colorMain", true, true); transparentPso = graphics("colorMain", true, false);
         outlinePso = graphics("outlineMain", true, false, "outlineVertex");
         wirePso = graphics("colorMain", true, true, "vertexMain", true);
@@ -78,7 +98,7 @@ struct NativeRenderer {
         shadowTracePso=compute("shadowTraceMain");shadowTemporalPso=compute("shadowTemporalMain");shadowSpatialPso=compute("shadowSpatialMain");shadowFinalPso=compute("shadowSpatialFinalMain");
         constants = buffer(768,D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
         // Populate unused descriptors, including texture slots, with safe null resources.
-        for(uint32_t i=0;i<148;i++) { D3D12_SHADER_RESOURCE_VIEW_DESC v{}; v.Format=DXGI_FORMAT_R8G8B8A8_UNORM; v.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D; v.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; v.Texture2D.MipLevels=1; d.device->CreateShaderResourceView(nullptr,&v,cpu(i)); }
+        for(uint32_t i=0;i<149;i++) { D3D12_SHADER_RESOURCE_VIEW_DESC v{}; v.Format=DXGI_FORMAT_R8G8B8A8_UNORM; v.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D; v.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; v.Texture2D.MipLevels=1; d.device->CreateShaderResourceView(nullptr,&v,cpu(i)); }
         std::ifstream in(directory / "32x32x24x32_R32_UINT.bin",std::ios::binary);
         std::vector<uint8_t> table((std::istreambuf_iterator<char>(in)),{}); if(table.size()!=98304) throw std::runtime_error("CORTAO lookup table is missing");
         d.begin(); lut = texture(32,32,DXGI_FORMAT_R32_UINT,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST,24);
@@ -249,6 +269,8 @@ struct NativeRenderer {
         textureView(motion.Get(),164,true);textureView(shadowRawTexture.Get(),165,true);textureView(shadowGuideTexture.Get(),168,true);
         textureView(shadowFilters[0].Get(),146);textureView(shadowFilters[0].Get(),166,true);textureView(shadowFilters[1].Get(),169,true);
         aaOutput=texture(ow,oh,DXGI_FORMAT_R16G16B16A16_FLOAT,rw,D3D12_RESOURCE_STATE_GENERIC_READ);
+        composite=texture(ow,oh,DXGI_FORMAT_R8G8B8A8_UNORM,rw,D3D12_RESOURCE_STATE_GENERIC_READ);
+        textureView(composite.Get(),148);textureView(composite.Get(),173,true);
         aaMotion=texture(w,h,DXGI_FORMAT_R16G16_FLOAT,rw|D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_GENERIC_READ);
         aaDepth=texture(w,h,DXGI_FORMAT_R32_FLOAT,rw|D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_GENERIC_READ,1,false,1,1,1);
         aaExposure=texture(1,1,DXGI_FORMAT_R32_FLOAT,rw,D3D12_RESOURCE_STATE_GENERIC_READ);
@@ -315,9 +337,10 @@ struct NativeRenderer {
     }
     static float halton(uint32_t index,uint32_t base){float result=0,f=1;while(index){f/=float(base);result+=f*(index%base);index/=base;}return result;}
     std::string render(const std::vector<uint8_t>& packet) {
-        if(!hasModel)throw std::runtime_error("Load a model before rendering");Reader r{packet};uint32_t id=r.u32();float frame[72];memcpy(frame,r.take(sizeof(frame)),sizeof(frame));
+        if(!hasModel)throw std::runtime_error("Load a model before rendering");Reader r{packet};uint32_t id=r.u32();float frame[76];memcpy(frame,r.take(sizeof(frame)),sizeof(frame));
         wireframe=frame[55]>0;outlines=frame[49]>0&&frame[63]>0&&!wireframe;
         for(float f:frame)if(!std::isfinite(f))throw std::runtime_error("Invalid frame constants");
+        frame[72]=std::clamp(frame[72],0.0f,1.0f);
         if(frame[44]<1||frame[45]<1||frame[44]>4096||frame[45]>4096)throw std::runtime_error("Unsupported viewport size");
         uint32_t ow=uint32_t(frame[44]),oh=uint32_t(frame[45]);
         uint32_t requested=frame[53]>0||wireframe?0u:uint32_t(std::clamp(frame[67],0.0f,3.0f));
@@ -327,6 +350,8 @@ struct NativeRenderer {
         acquireOutput(id);
         bool temporal=frame[50]>0&&frame[54]>=1&&frame[54]<=4&&frame[53]==0&&!wireframe;
         bool cameraChanged=std::memcmp(frame,previousFrame.data(),32*sizeof(float))!=0;
+        // Sharpening (floats 72..75) is a pure post-process: deliberately outside
+        // the appearance range so adjusting it never resets reconstruction history.
         bool appearanceChanged=std::memcmp(frame+32,previousFrame.data()+32,40*sizeof(float))!=0;
         bool aaReset=!aaHistoryValid||modeChanged||appearanceChanged;
         bool invalidate=!historyValid;
@@ -347,8 +372,8 @@ struct NativeRenderer {
         textureView(surfaces[shadowIndex].Get(),138);textureView(surfaces[1-shadowIndex].Get(),142);textureView(surfaces[shadowIndex].Get(),163,true);
         textureView(shadowHistories[1-shadowIndex].Get(),141);textureView(shadowHistories[shadowIndex].Get(),143);textureView(shadowHistories[shadowIndex].Get(),167,true);
         void* mapped=nullptr;check(constants->Map(0,nullptr,&mapped),"Map constants");memcpy(mapped,frame,sizeof(frame));memcpy((uint8_t*)mapped+sizeof(frame),mipInfo.data(),sizeof(mipInfo));
-        memcpy((uint8_t*)mapped+416,previousFrame.data(),128);memcpy((uint8_t*)mapped+544,info,sizeof(info));
-        memcpy((uint8_t*)mapped+560,aaParams,sizeof(aaParams));memcpy((uint8_t*)mapped+576,jitter,sizeof(jitter));constants->Unmap(0,nullptr);
+        memcpy((uint8_t*)mapped+432,previousFrame.data(),128);memcpy((uint8_t*)mapped+560,info,sizeof(info));
+        memcpy((uint8_t*)mapped+576,aaParams,sizeof(aaParams));memcpy((uint8_t*)mapped+592,jitter,sizeof(jitter));constants->Unmap(0,nullptr);
         auto began=std::chrono::steady_clock::now();d.begin();
         for(auto* resource:{normal.Get(),surfaces[shadowIndex].Get(),motion.Get()})transition(resource,D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_RENDER_TARGET);
         draw(true);
@@ -366,12 +391,36 @@ struct NativeRenderer {
         } else {
             transition(hdrMs.Get(),D3D12_RESOURCE_STATE_RESOLVE_SOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET);draw(false);transition(hdrMs.Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_RESOLVE_SOURCE);transition(hdr.Get(),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_RESOLVE_DEST);d.list->ResolveSubresource(hdr.Get(),0,hdrMs.Get(),0,DXGI_FORMAT_R16G16B16A16_FLOAT);transition(hdr.Get(),D3D12_RESOURCE_STATE_RESOLVE_DEST,D3D12_RESOURCE_STATE_GENERIC_READ);
         }
-        bindings(false);transition(sharedOutput.Get(),D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);d.list->SetPipelineState(outputPso.Get());d.list->Dispatch((ow+7)/8,(oh+7)/8,1);transition(sharedOutput.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_COMMON);d.submit();
+        bindings(false);
+        // NVSharpen reads the finished sRGB composite, so outputMain targets an
+        // intermediate surface and the NIS pass writes the shared output. AO debug
+        // bypasses it; with amount 0 outputMain writes the shared output directly.
+        bool sharpen=frame[72]>0&&frame[53]==0;
+        if(sharpen) {
+            NISConfig config{};
+            NVSharpenUpdateConfig(config,frame[72],0,0,ow,oh,ow,oh,0,0,NISHDRMode::None);
+            void* nisMapped=nullptr;check(nisConfig->Map(0,nullptr,&nisMapped),"Map NIS config");memcpy(nisMapped,&config,sizeof(config));nisConfig->Unmap(0,nullptr);
+            transition(composite.Get(),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            transition(sharedOutput.Get(),D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            d.list->SetPipelineState(outputPso.Get());d.list->Dispatch((ow+7)/8,(oh+7)/8,1);
+            transition(composite.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_GENERIC_READ);
+            d.list->SetComputeRootSignature(nisRoot.Get());
+            d.list->SetComputeRootConstantBufferView(0,nisConfig->GetGPUVirtualAddress());
+            d.list->SetComputeRootDescriptorTable(1,gpu(148));
+            d.list->SetComputeRootDescriptorTable(2,gpu(162));
+            d.list->SetPipelineState(sharpenPso.Get());d.list->Dispatch((ow+31)/32,(oh+31)/32,1);
+            transition(sharedOutput.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_COMMON);
+        } else {
+            transition(sharedOutput.Get(),D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            d.list->SetPipelineState(outputPso.Get());d.list->Dispatch((ow+7)/8,(oh+7)/8,1);
+            transition(sharedOutput.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_COMMON);
+        }
+        d.submit();
         historyValid=temporal;previousVertexBuffer=vertexBuffer;std::copy(std::begin(frame),std::end(frame),previousFrame.begin());poseChanged=false;shadowIndex=1-shadowIndex;
         aaHistoryValid=aaActive;previousJitter[0]=jitter[0];previousJitter[1]=jitter[1];lastRender=began;
         if(temporal)stableFrames=std::min(stableFrames+1,32u);
         if(aaActive)aaStableFrames=std::min(aaStableFrames+1,32u);
         const char* aaName=dlss.mode==1?"DLAA":dlss.mode==2?"DLSS Quality":dlss.mode==3?"DLSS Balanced":"MSAA 4x";
-        double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();std::ostringstream s;s<<"{\"type\":\"frame\",\"id\":"<<id<<",\"handle\":\""<<uint64_t(remoteHandle)<<"\",\"width\":"<<ow<<",\"height\":"<<oh<<",\"renderWidth\":"<<width<<",\"renderHeight\":"<<height<<",\"antialiasing\":\""<<aaName<<"\",\"aaReset\":"<<(aaReset?"true":"false")<<",\"renderMs\":"<<ms<<",\"aaAccumulating\":"<<(aaActive&&aaStableFrames<32?"true":"false")<<",\"shadowAccumulating\":"<<(temporal&&frame[46]>0&&stableFrames<32?"true":"false")<<'}';return s.str();
+        double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();std::ostringstream s;s<<"{\"type\":\"frame\",\"id\":"<<id<<",\"handle\":\""<<uint64_t(remoteHandle)<<"\",\"width\":"<<ow<<",\"height\":"<<oh<<",\"renderWidth\":"<<width<<",\"renderHeight\":"<<height<<",\"antialiasing\":\""<<aaName<<"\",\"sharpen\":"<<uint32_t(std::lround(frame[72]*100))<<",\"aaReset\":"<<(aaReset?"true":"false")<<",\"renderMs\":"<<ms<<",\"aaAccumulating\":"<<(aaActive&&aaStableFrames<32?"true":"false")<<",\"shadowAccumulating\":"<<(temporal&&frame[46]>0&&stableFrames<32?"true":"false")<<'}';return s.str();
     }
 };

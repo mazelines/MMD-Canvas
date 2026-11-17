@@ -10,6 +10,12 @@ PMX(MMD) 모델을 미리 보고 **FBX / USD로 변환**하는 데스크톱 앱�
 
 [배포 파일 다운로드](https://github.com/mazelines/MMD-Canvas/releases) · [CI 실행 결과](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [릴리스 가이드](docs/releases.md)
 
+## v0.5.6: 그리드 품질과 NVIDIA 샤픈
+
+낮은 카메라 각도에서 그리드 선이 끊기거나 깜빡이던 문제를 수정했습니다. 출력 해상도와 바닥의 투영 크기로 선을 필터링하고, 멀리서 촘촘해지는 선과 외곽을 부드럽게 처리합니다. 그리드는 기본적으로 꺼져 있으며 첫 실행의 번들 캔버스에도 적용됩니다. 반투명 재질은 머티리얼 목록의 체크박스를 노란색으로 표시합니다.
+
+NVIDIA NIS NVSharpen을 추가했습니다. DLAA·DLSS·MSAA 모두에서 최종 화면의 선명도를 0–100%로 조절할 수 있으며 기본값은 25%입니다. 설정은 PC에 저장되고, 0%에서는 샤픈 패스를 건너뜁니다. 샤픈은 잔여 시간 변동을 강조할 수 있습니다. [구조와 제한](docs/dlss.md) · [0.5.6 변경 내용](docs/release-notes/v0.5.6.md).
+
 ## v0.5.5: DLAA · DLSS
 
 기본 AA로 NVIDIA DLAA를 추가하고 DLSS Quality·Balanced와 MSAA 4×를 선택할 수 있게 했습니다. HDR 색상·깊이·모션 벡터로 EV100·GT7 이전에 복원하며 Lambert·Toon 모두 적용합니다. DLAA·DLSS는 RTX 20 시리즈 이상에서 지원하며 실제 사용 가능 여부는 GPU·드라이버에서 확인합니다. 지원하지 않는 GPU에서는 DX12 MSAA 4×를 사용합니다.

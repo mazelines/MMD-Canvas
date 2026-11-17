@@ -28,6 +28,16 @@ $('viewport-aa').addEventListener('change',()=>{
   viewer.dx12.aaMode=Number($('viewport-aa').value);localStorage.setItem('viewportAA',String(viewer.dx12.aaMode));
   if(!viewer.dx12.enabled)void viewer.dx12.start();else viewer.requestRender();
 });
+const applySharpen=(value,save=true)=>{
+  const amount=Math.min(100,Math.max(0,Math.round(Number(value)||0)));
+  viewer.dx12.sharpen=amount;
+  $('viewport-sharpen').value=String(amount);
+  $('viewport-sharpen-value').textContent=amount+'%';
+  if(save)localStorage.setItem('viewportSharpen',String(amount));
+  viewer.requestRender();
+};
+$('viewport-sharpen').addEventListener('input',()=>applySharpen($('viewport-sharpen').value));
+applySharpen(viewer.dx12.sharpen,false);
 const materialPanel = new MaterialPanel(viewer);
 const applyRenderMode = (mode, save = false) => {
   viewer.setRenderMode(mode);

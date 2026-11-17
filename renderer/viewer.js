@@ -58,7 +58,8 @@ export class Viewer {
     this.renderMode = 'lambert';
     this.outlineSettings = { width: 1.6, color: '#151923' };
     this.skeleton = null;
-    this.flags = { wireframe: false, skeleton: false, grid: true };
+    this.flags = { wireframe: false, skeleton: false, grid: false };
+    this.grid.visible = this.flags.grid;
     this.loadToken = 0;
     this.needsRender = true;
 

@@ -15,6 +15,7 @@ cbuffer Frame : register(b0) {
     float4 misc;             // ground height, grid size, model diagonal, outline width
     float4 outlineColor;     // exposure-protected scene-linear outline RGB, requested AA mode
     float4 grid;             // center X/Z, width, cell size
+    float4 sharpening;       // post-reconstruction amount 0..1, unused, unused, unused
     uint4 mipInfo[8];        // width, height, packed offset, unused
     float4x4 previousView;
     float4x4 previousProjection;
@@ -44,6 +45,7 @@ Texture2D<float4> shadowResolved : register(t144);
 Texture2D<float4> shadowGuide : register(t145);
 Texture2D<float4> shadowSpatialIntermediate : register(t146);
 Texture2D<float4> aaResult : register(t147);
+Texture2D<float4> composite : register(t148);
 RWStructuredBuffer<uint> packedOut : register(u0);
 RWTexture2D<float> aoOut : register(u1);
 RWTexture2D<float4> output : register(u2);
@@ -57,6 +59,7 @@ RWTexture2D<float4> shadowFinalOut : register(u9);
 RWTexture2D<float2> aaMotionOut : register(u10);
 RWTexture2D<float> aaDepthOut : register(u11);
 RWTexture2D<float> aaExposureOut : register(u12);
+RWTexture2D<float4> compositeOut : register(u13);
 SamplerState linearWrap : register(s0);
 SamplerState nearestClamp : register(s1);
 float3 decodeSRGB(float3 c) { return select(c <= 0.04045, c / 12.92, pow((c + 0.055) / 1.055, 2.4)); }
@@ -283,6 +286,7 @@ void cortao_writeResult(int2 p, float visibility, float3 bentNormal, float3x3 ba
     p.inverseMaxSlopeCompensation = 0.25; p.backfaceThreshold = 0.5;
     cortao_mainPass(tid.xy, p);
 }
+#include "grid.hlsl"
 [numthreads(8,8,1)] void outputMain(uint3 tid : SV_DispatchThreadID) {
     if (any(tid.xy >= uint2(aaInfo.xy))) return;
     if (ao.y > 0) {
@@ -297,7 +301,8 @@ void cortao_writeResult(int2 p, float visibility, float3 bentNormal, float3x3 ba
         float3 origin=-mul(transpose((float3x3)view),float3(view[0][3],view[1][3],view[2][3]));
         float2 uv=(float2(tid.xy)+0.5)/aaInfo.xy;
         int2 inputPixel=clamp(int2(uv*viewport.xy-aaJitter.xy),0,int2(viewport.xy)-1);
-        float3 direction=mul(transpose((float3x3)view),normalize(float3((uv.x*2-1)/projection[0][0],(1-uv.y*2)/projection[1][1],-1)));
+        float3 ray=mul(transpose((float3x3)view),float3((uv.x*2-1)/projection[0][0],(1-uv.y*2)/projection[1][1],-1));
+        float3 direction=normalize(ray);
         float t=(misc.x-origin.y)/direction.y;
         if(t>0 && direction.y<-0.00001) {
             float3 p=origin+direction*t;float2 coord=p.xz-grid.xy;
@@ -310,16 +315,13 @@ void cortao_writeResult(int2 p, float visibility, float3 bentNormal, float3x3 ba
                     temporalInfo.w != 0 ? traceShadow(groundOrigin,float3(0,1,0),float2(tid.xy)).x : shadowVisibility(groundOrigin,float3(0,1,0),float2(tid.xy));
                 bg*=1-0.5*(1-groundShade)*fade;
             }
-            if(background.w>0 && all(abs(coord)<grid.z*0.5)) {
-                float pixelWorld=max(t*2/(projection[1][1]*aaInfo.y),0.000001);
-                float2 edge=abs(frac(coord/grid.w+0.5)-0.5)*grid.w;
-                float coverage=1-smoothstep(pixelWorld*0.2,pixelWorld*0.8,min(edge.x,edge.y));
-                float3 color=decodeSRGB(min(abs(coord.x),abs(coord.y))<pixelWorld?float3(90,96,112)/255.0:float3(54,58,68)/255.0);
-                bg=lerp(bg,color,coverage);
-            }
+            if(background.w>0) bg=compositeGrid(bg,origin,ray,coord);
         }
     }
     rgb = lerp(bg, rgb, hdr.a);
-    output[tid.xy] = float4(encodeSRGB(saturate(rgb)), 1);
+    float4 result = float4(encodeSRGB(saturate(rgb)), 1);
+    // Sharpening reads finished neighbors, so the composite lands in an
+    // intermediate surface first; sharpenMain then writes the shared output.
+    if (sharpening.x > 0) compositeOut[tid.xy] = result; else output[tid.xy] = result;
 }
 #include "antialiasing.hlsl"

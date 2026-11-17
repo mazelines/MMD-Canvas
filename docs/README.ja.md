@@ -10,6 +10,12 @@ PMX（MMD）モデルをプレビューし、**FBX / USD に変換**するデス
 
 [ダウンロード](https://github.com/mazelines/MMD-Canvas/releases) · [CI 結果](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [リリースガイド（韓国語）](releases.md)
 
+## v0.5.6：グリッド品質と NVIDIA シャープニング
+
+低い視点でグリッドの線が途切れたりちらついたりする問題を修正しました。出力解像度で床の投影サイズに応じて線をフィルタリングし、遠方の密集した線と外周を滑らかに処理します。初回起動の同梱キャンバスを含め、グリッドの既定値をオフにしました。半透明マテリアルは一覧のチェックボックスを黄色で表示します。
+
+NVIDIA NIS NVSharpen を追加しました。DLAA・DLSS・MSAA で最終画面の鮮明さを 0–100% に調整でき、既定値は 25% です。設定は PC に保存され、0% ではパスを省略します。残留する時間方向の変動が強調される場合があります。[構成と制限（韓国語）](dlss.md) · [0.5.6 リリースノート](release-notes/v0.5.6.md)。
+
 ## v0.5.5：DLAA・DLSS
 
 既定の AA に NVIDIA DLAA を追加し、DLSS Quality・DLSS Balanced・MSAA 4× を選択できます。Lambert・Toon ともに深度とモーションベクトルを使い、EV100・GT7 より前に HDR カラーを復元します。DLAA/SR は RTX 20 シリーズ以降に対応し、実際の GPU・ドライバー対応状況を照会します。非対応 GPU では DX12 MSAA 4× を使用します。
