@@ -96,6 +96,7 @@ export function nativeModel(object, poseOnly = false) {
 export class Dx12Viewport {
   constructor(viewer, status) {
     this.viewer = viewer; this.status = status; this.enabled = false; this.busy = false; this.dirty = false; this.loadedKey = ''; this.id = 0; this.shadowSamples = 4;
+    const savedAA=Number(localStorage.getItem('viewportAA')??1);this.aaMode=[0,1,2,3].includes(savedAA)?savedAA:1;
     this.canvas = viewer.canvas; this.empty = new THREE.Group();
     // Canvas2D loses its pixels when Chromium's GPU process restarts. A static
     // scene otherwise has no camera/animation change to request a fresh frame.
@@ -120,6 +121,8 @@ export class Dx12Viewport {
       try {
         const caps = await window.api.dx12Start();
         this.capabilities = caps; this.loadedKey = ''; this.loadedPoseKey = '';
+        const aa=document.getElementById('viewport-aa');
+        if(aa){for(const option of aa.options)option.disabled=option.value!=='0'&&!caps.dlss;aa.value=String(caps.dlss?this.aaMode:0);if(!caps.dlss)aa.title=caps.dlssReason;}
         this.enabled = true; this.canvas.hidden = false; this.helpers.hidden = false;
         this.clearError(); this.status.textContent = `DX12 Ultimate · ${caps.gpu}`;
         this.viewer.requestRender();
@@ -163,6 +166,7 @@ export class Dx12Viewport {
     f[63] *= size.x * scale / v.container.clientWidth;
     const outline=new THREE.Color(v.outlineSettings.color);
     f.set(outline.toArray().map(c=>gt7InverseDisplay(c)/v.exposureMultiplier),64);
+    f[67]=this.capabilities?.dlss?this.aaMode:0;
     if(!v.grid.geometry.boundingBox)v.grid.geometry.computeBoundingBox();
     const gp=v.grid.geometry.attributes.position;
     f.set([v.grid.position.x,v.grid.position.z,v.grid.geometry.boundingBox.max.x*2,Math.abs(gp.getZ(4)-gp.getZ(0))||1],68);
@@ -209,10 +213,10 @@ export class Dx12Viewport {
         if(key!==this.loadedKey) { await window.api.dx12Model(nativeModel(this.object)); this.loadedKey=key;this.loadedPoseKey=poseKey; }
         else if(poseKey!==this.loadedPoseKey) { await window.api.dx12Pose(nativeModel(this.object,true));this.loadedPoseKey=poseKey; }
         const result=await window.api.dx12Render(this.frame());
-        this.lastFrame=result;this.status.textContent=`DX12 Ultimate · DXR · ${result.renderMs.toFixed(1)} ms`;
+        this.lastFrame=result;this.status.textContent=`DX12 Ultimate · ${result.antialiasing||'MSAA 4x'} · ${result.renderMs.toFixed(1)} ms`;
         // Finish temporal convergence even when the camera/model becomes still.
         // Presentation acknowledgement already paces frames and bounds GPU leases.
-        if(result.shadowAccumulating)this.dirty=true;
+        if(result.shadowAccumulating||result.aaAccumulating)this.dirty=true;
       }
     } catch(e) { this.fail(e);
     } finally {this.busy=false;}

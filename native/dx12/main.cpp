@@ -75,8 +75,10 @@ struct Device {
         if (fence->GetCompletedValue() < fenceValue) { check(fence->SetEventOnCompletion(fenceValue, event), "Wait fence"); if (WaitForSingleObject(event, 10000) != WAIT_OBJECT_0) { check(device->GetDeviceRemovedReason(), "GPU wait failed"); throw std::runtime_error("GPU timed out"); } }
         ComPtr<ID3D12InfoQueue> info;
         if (SUCCEEDED(device.As(&info))) {
-            for (UINT64 i=0;i<info->GetNumStoredMessagesAllowedByRetrievalFilter();i++) { SIZE_T size=0; info->GetMessage(i,nullptr,&size); std::vector<uint8_t> data(size); auto message=reinterpret_cast<D3D12_MESSAGE*>(data.data()); info->GetMessage(i,message,&size); if(message->Severity<=D3D12_MESSAGE_SEVERITY_WARNING)std::cerr<<message->pDescription<<std::endl; }
+            std::string validationError;
+            for (UINT64 i=0;i<info->GetNumStoredMessagesAllowedByRetrievalFilter();i++) { SIZE_T size=0; info->GetMessage(i,nullptr,&size); std::vector<uint8_t> data(size); auto message=reinterpret_cast<D3D12_MESSAGE*>(data.data()); info->GetMessage(i,message,&size); if(message->Severity<=D3D12_MESSAGE_SEVERITY_WARNING)std::cerr<<message->pDescription<<std::endl;if(message->Severity<=D3D12_MESSAGE_SEVERITY_ERROR)validationError=message->pDescription; }
             info->ClearStoredMessages();
+            if(!validationError.empty())throw std::runtime_error("DX12 validation: "+validationError);
         }
         check(device->GetDeviceRemovedReason(), "Device removed");
     }
@@ -95,7 +97,8 @@ int main(int argc, char** argv) {
             _setmode(_fileno(stdin), _O_BINARY);
             auto directory=std::filesystem::absolute(argv[0]).parent_path();
             NativeRenderer renderer(device,directory,DWORD(std::stoul(argv[2])));
-            std::cout << "{\"type\":\"ready\",\"capabilities\":" << device.capabilities() << "}" << std::endl;
+            auto caps=device.capabilities();caps.pop_back();caps+=",\"dlss\":"+std::string(renderer.dlss.supported?"true":"false")+",\"dlssReason\":"+::quoted(renderer.dlss.reason)+"}";
+            std::cout << "{\"type\":\"ready\",\"capabilities\":" << caps << "}" << std::endl;
             uint32_t header[2];
             while(std::cin.read(reinterpret_cast<char*>(header),sizeof(header))) {
                 if(header[1]>512u*1024u*1024u)throw std::runtime_error("Native packet too large");

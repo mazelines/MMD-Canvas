@@ -44,7 +44,7 @@ float4 traceShadow(float3 origin, float3 normal, float2 pixel) {
     ShadowSurface receiver;
     if(surface.w==0) {
         float3 camera=-mul(transpose((float3x3)view),float3(view[0][3],view[1][3],view[2][3]));
-        float2 uv=(float2(tid.xy)+0.5)/viewport.xy;
+        float2 uv=(float2(tid.xy)+0.5+aaJitter.xy)/viewport.xy;
         float3 direction=mul(transpose((float3x3)view),normalize(float3((uv.x*2-1)/projection[0][0],(1-uv.y*2)/projection[1][1],-1)));
         float t=(misc.x-camera.y)/direction.y;
         float3 p=camera+direction*t;p.y=misc.x;
@@ -57,7 +57,7 @@ float4 traceShadow(float3 origin, float3 normal, float2 pixel) {
     surfaceOut[tid.xy]=surface;
     float4 oldView=mul(previousView,float4(motion.xyz,1));
     float4 oldClip=mul(previousProjection,oldView);
-    float2 oldPixel=(oldClip.xy/max(oldClip.w,1e-8)*float2(0.5,-0.5)+0.5)*viewport.xy;
+    float2 oldPixel=(oldClip.xy/max(oldClip.w,1e-8)*float2(0.5,-0.5)+0.5)*viewport.xy-aaJitter.zw;
     // Current-to-previous motion in pixels, expected previous linear depth, validity.
     motionOut[tid.xy]=float4(oldPixel-(float2(tid.xy)+0.5),-oldView.z,oldClip.w>0?1:0);
     shadowGuideOut[tid.xy]=float4(receiver.normal,-mul(view,float4(surface.xyz,1)).z);
@@ -70,7 +70,7 @@ float4 traceShadow(float3 origin, float3 normal, float2 pixel) {
     if(viewport.z==0){shadowHistoryOut[p]=float4(raw.xy,1,0);return;}
     float4 history=0;float total=0;
     [branch] if(temporalInfo.y!=0&&motion.w>0) {
-        float2 oldPixel=float2(p)+motion.xy,uv=(oldPixel+0.5)/viewport.xy;
+        float2 oldPixel=float2(p)+motion.xy,uv=(oldPixel+0.5+aaJitter.zw)/viewport.xy;
         int2 base=int2(floor(oldPixel));float2 fraction=frac(oldPixel);
         float oldPixelWorld=max(2*motion.z/(previousProjection[1][1]*viewport.y),1e-8);
         float3 expectedView=float3((uv.x*2-1)*motion.z/previousProjection[0][0],(1-uv.y*2)*motion.z/previousProjection[1][1],-motion.z);

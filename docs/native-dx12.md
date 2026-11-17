@@ -13,10 +13,10 @@ DDS의 BC1/BC2/BC3/BC6H/BC7 블록과 밉맵은 그대로 DX12에 업로드합�
 ## 프레임 순서
 
 1. 현재 포즈·모프를 정점 버퍼에 반영하고 BLAS/TLAS를 갱신합니다. 포즈 변경 시 텍스처를 다시 전송하지 않습니다.
-2. 전체 해상도 깊이·법선·표면 위치·이전 포즈 위치 프리패스를 만듭니다.
+2. 내부 해상도에서 깊이·법선·표면 위치·이전 포즈 위치 프리패스를 만듭니다. DLSS Quality·Balanced에서는 출력보다 작고 DLAA·MSAA에서는 출력과 같습니다.
 3. DXR 그림자를 저광선 패스에서 계산하고 모션 재투영·시간 누적·공간 필터로 복원합니다. 별도로 packed mip chain과 CORTAO 1.0.3 원본 HLSL/32-ray LUT로 AO를 계산합니다.
 4. Lambert·Toon 셰이더에서 방향광에는 DXR 그림자, 간접 확산광에는 `min(materialAO, CORTAO)`를 적용합니다. 발광은 보존합니다.
-5. RGBA16F에서 투명도와 Toon 헐을 합성하고 MSAA 4배를 resolve합니다.
+5. RGBA16F에서 투명도와 Toon 헐을 합성합니다. DLAA·DLSS에서는 단일 샘플 색상·깊이·모션 벡터를 NGX로 복원하고, MSAA에서는 4배 샘플을 resolve합니다. [DLAA·DLSS 구조와 제한](dlss.md).
 6. EV100 → GT7 SDR → sRGB 순으로 출력합니다. AO Debug View는 노출·톤매핑을 우회합니다.
 
 DXR 그림자는 표면에서 방향광의 각반경에 해당하는 원판을 샘플링합니다. 부드러움은 광원 크기이며 실시간 품질은 1 / 2 / 4 rays, 기본 4입니다. 비교용 128-ray 참조 모드는 시간 누적 없이 직접 계산합니다. PCSS blocker 검색이나 shadow-map 해상도에 의존하지 않습니다. 화면 밖의 모델도 그림자를 드리울 수 있습니다. 알파 마스크를 검사하고 완전 투명 재질은 제외하며, 유리의 색 투과·굴절 그림자는 지원하지 않습니다.
@@ -78,7 +78,7 @@ colorMain.rgb = L / 100
 - `min`은 현재 앱의 재질 AO 결합 정책입니다. 예를 들어 재질 AO 0.8과 화면 AO 0.6은 0.6으로 결합합니다. 재질 AO가 이미 더 어두우면 CORTAO 변화가 화면에 드러나지 않을 수 있습니다.
 - CORTAO는 간접 확산광에만 적용합니다. 직접광의 DXR 그림자·발광에는 곱하지 않습니다. 현재 bent normal과 specular occlusion은 사용하지 않습니다.
 
-이 RGB를 HDR 버퍼에 합성하고 MSAA를 resolve한 뒤 `outputMain`에서 노출 배율과 GT7, sRGB 변환을 적용합니다. AO Debug View만 `outputMain`에서 가시율을 직접 표시하며 노출·톤매핑을 우회합니다. 번들 `Zhuang Fangyi.canvas`에는 AO 설정이 없어 이전 파일 호환 규칙에 따라 CORTAO가 꺼진 상태로 복원됩니다.
+이 RGB를 HDR 버퍼에 합성하고 DLAA·DLSS 복원 또는 MSAA resolve 후 `outputMain`에서 노출 배율과 GT7, sRGB 변환을 적용합니다. AO Debug View만 `outputMain`에서 가시율을 직접 표시하며 노출·톤매핑을 우회합니다. 번들 `Zhuang Fangyi.canvas`에는 AO 설정이 없어 이전 파일 호환 규칙에 따라 CORTAO가 꺼진 상태로 복원됩니다.
 
 ## 지원 범위와 제한
 

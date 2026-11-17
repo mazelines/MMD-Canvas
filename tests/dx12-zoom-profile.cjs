@@ -30,7 +30,7 @@ app.on('browser-window-created', (_event, win) => {
           v.camera.lookAt(close?z.head:z.target);v.camera.aspect=w/h;v.camera.updateProjectionMatrix();v.camera.updateMatrixWorld();
           const native=[],total=[];
           for(let i=0;i<48;i++){
-            const data=v.dx12.frame(),f=new Float32Array(data,4);f[44]=w;f[45]=h;f[50]=${rays>0?1:0};f[51]=${ao};f[53]=0;f[54]=${rays||1};
+            const data=v.dx12.frame(),f=new Float32Array(data,4);f[44]=w;f[45]=h;f[50]=${rays>0?1:0};f[51]=${ao};f[53]=0;f[54]=${rays||1};f[67]=0;
             const started=performance.now(),result=await api.dx12Render(data);
             if(i>=36){native.push(result.renderMs);total.push(performance.now()-started);}
           }

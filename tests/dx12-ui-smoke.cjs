@@ -54,6 +54,7 @@ app.on('browser-window-created',(_event,win)=>{
           f.set([options.width??160,options.height??160,options.softness??0.06,1],44);
           f.set([options.exposure??100,options.toon??0,options.shadow??0,options.ao??0],48);
           f.set([1,options.debug??0,options.rays??32,0],52);f.set([...(options.background??[0.03,0.03,0.03]),0],56);f.set([options.ground??-1,10,options.diagonal??7,options.outline??0],60);
+          f[67]=options.aa??0;
           v.testFrame=await api.dx12Render(data);const c=document.getElementById('dx12-canvas');return c.getContext('2d').getImageData(0,0,c.width,c.height).data;
         };
         const difference=(a,b)=>{let darker=0,changed=0,max=0;for(let i=0;i<a.length;i+=4){const d=a[i]-b[i];if(d>2)darker++;if(Math.abs(d)>2)changed++;max=Math.max(max,Math.abs(d))}return{darker,changed,max}};

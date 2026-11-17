@@ -311,6 +311,8 @@ export const messages = {
   "주변광": ["Ambient", "环境光", "環境光"],
   "렌더러": ["Renderer", "渲染器", "レンダラー"],
   "DXR 그림자 품질": ["DXR shadow quality", "DXR 阴影质量", "DXR シャドウ品質"],
+  "안티앨리어싱": ["Anti-aliasing", "抗锯齿", "アンチエイリアシング"],
+  "DLAA는 원래 해상도에서 화질을 개선합니다. DLSS는 낮은 해상도를 복원해 렌더링 부하를 줄입니다.": ["DLAA improves quality at native resolution. DLSS reconstructs a lower resolution to reduce rendering work.", "DLAA 在原始分辨率下改善画质。DLSS 从较低分辨率重建画面以降低渲染负载。", "DLAA は元の解像度で画質を改善します。DLSS は低い解像度から復元して描画負荷を軽減します。"],
   "1·2·4광선은 시간 누적과 디노이징으로 복원합니다. 참조 모드는 느린 품질 비교용입니다.": ["1/2/4 rays use temporal accumulation and denoising. Reference mode is a slow quality comparison.", "1/2/4 条光线使用时间累积和降噪重建。参考模式用于较慢的质量对比。", "1・2・4 rays は時間蓄積とデノイズで復元します。参照モードは低速な品質比較用です。"],
   "DXR · 실시간 (1)": ["DXR · Realtime (1)", "DXR · 实时 (1)", "DXR · リアルタイム (1)"],
   "DXR · 균형 (2)": ["DXR · Balanced (2)", "DXR · 平衡 (2)", "DXR · バランス (2)"],

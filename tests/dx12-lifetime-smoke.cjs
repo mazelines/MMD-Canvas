@@ -37,7 +37,8 @@ app.on('browser-window-created', (_event, win) => {
           for(let i=0;i<400;i++) {
             const a=i*0.015;v.camera.position.set(target.x+Math.sin(a)*radius,target.y+Math.sin(a*0.5)*radius*0.15,target.z+Math.cos(a)*radius);
             v.camera.lookAt(target);v.camera.updateMatrixWorld();
-            const start=performance.now();await api.dx12Render(v.dx12.frame());times.push(performance.now()-start);
+            const data=v.dx12.frame();new Float32Array(data,4)[67]=v.dx12.capabilities.dlss?1+Math.floor(i/100)%3:0;
+            const start=performance.now();await api.dx12Render(data);times.push(performance.now()-start);
           }
           times.sort((a,b)=>a-b);return{frames:times.length,median:times[200],p95:times[380],max:times.at(-1)};
         })()`);

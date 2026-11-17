@@ -45,6 +45,7 @@ npm run build:dx12
 npm run test:dx12
 npm run test:presentation
 npm run test:lifetime
+npm run test:dlss
 npm run pack
 npm run dist
 ```
@@ -52,6 +53,10 @@ npm run dist
 결과는 `dist/`에 생성된다. `pack`과 `dist`는 DX12 실행 파일·HLSL을 먼저 빌드하고, 런타임 파일 및 `Example` 전체 파일의 원본 일치를 검사한다. GPU 통합 테스트는 DX12 Ultimate GPU가 있는 로컬 PC에서 수행한다. GitHub 호스팅 러너의 기본 CI는 하드웨어 GPU 테스트와 Blender import 검사를 실행하지 않는다.
 
 ## 서명과 업데이트
+
+v0.5.5부터 첫 네이티브 빌드에서 고정된 NVIDIA NGX SDK 파일을 다운로드한다. 이후에는 SHA-256이 일치하는 캐시를 사용한다. 패키지에는 배포용 `nvngx_dlss.dll`과 `licenses/NVIDIA-DLSS.txt`를 포함하고 DLL 해시도 검사한다. RTX GPU가 없는 CI에서는 DLSS 실행 검증을 수행하지 않는다. [구현과 로컬 검증](dlss.md).
+
+NVIDIA SDK는 프로젝트 MIT 라이선스와 별도 조건을 따른다. SDK 라이선스 RTX 보충 조항 4·7의 상용 출시 전 통지 및 SDK/상표 표기 요건을 DLSS 포함 배포 전에 확인한다. v0.5.4에는 NVIDIA SDK가 포함되어 있지 않다.
 
 현재 배포물은 인증서 없는 Windows 빌드이다. Windows 코드 서명은 별도 인증서와 계정 설정이 필요하다. OS 보안 정책에 따라 실행이 제한될 수 있다.
 

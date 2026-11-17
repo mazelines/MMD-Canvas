@@ -13,12 +13,14 @@ cbuffer Frame : register(b0) {
     float4 ao;               // strength, debug: 0/color 1/filtered 2/raw, shadow samples, bias
     float4 background;       // display-linear background, grid enabled
     float4 misc;             // ground height, grid size, model diagonal, outline width
-    float4 outlineColor;     // exposure-protected scene-linear outline RGB
+    float4 outlineColor;     // exposure-protected scene-linear outline RGB, requested AA mode
     float4 grid;             // center X/Z, width, cell size
     uint4 mipInfo[8];        // width, height, packed offset, unused
     float4x4 previousView;
     float4x4 previousProjection;
     uint4 temporalInfo;      // sampling frame, valid history, max history, enabled
+    float4 aaInfo;           // output width/height, DLSS active, material mip bias
+    float4 aaJitter;         // current/previous sample offsets in render pixels
 };
 cbuffer Draw : register(b1) { uint materialId; uint mipLevel; uint triangleOffset; uint unused1; };
 StructuredBuffer<Vertex> vertices : register(t0);
@@ -41,6 +43,7 @@ Texture2D<float4> shadowSpatialInput : register(t143);
 Texture2D<float4> shadowResolved : register(t144);
 Texture2D<float4> shadowGuide : register(t145);
 Texture2D<float4> shadowSpatialIntermediate : register(t146);
+Texture2D<float4> aaResult : register(t147);
 RWStructuredBuffer<uint> packedOut : register(u0);
 RWTexture2D<float> aoOut : register(u1);
 RWTexture2D<float4> output : register(u2);
@@ -51,24 +54,32 @@ RWTexture2D<float4> shadowSpatialOut : register(u6);
 RWTexture2D<float4> shadowHistoryOut : register(u7);
 RWTexture2D<float4> shadowGuideOut : register(u8);
 RWTexture2D<float4> shadowFinalOut : register(u9);
+RWTexture2D<float2> aaMotionOut : register(u10);
+RWTexture2D<float> aaDepthOut : register(u11);
+RWTexture2D<float> aaExposureOut : register(u12);
 SamplerState linearWrap : register(s0);
 SamplerState nearestClamp : register(s1);
 float3 decodeSRGB(float3 c) { return select(c <= 0.04045, c / 12.92, pow((c + 0.055) / 1.055, 2.4)); }
 float3 encodeSRGB(float3 c) { return select(c <= 0.0031308, c * 12.92, 1.055 * pow(max(c, 0), 1.0 / 2.4) - 0.055); }
 float4 imageSample(int id, float2 uv) { return id < 0 ? float4(1,1,1,1) : images[NonUniformResourceIndex(id)].SampleLevel(linearWrap, uv, 0); }
-float4 imageSurface(int id, float2 uv) { return id < 0 ? float4(1,1,1,1) : images[NonUniformResourceIndex(id)].Sample(linearWrap, uv); }
+float4 imageSurface(int id, float2 uv) { return id < 0 ? float4(1,1,1,1) : images[NonUniformResourceIndex(id)].SampleBias(linearWrap, uv, aaInfo.w); }
 float2 surfaceUv(Material m, float2 uv) { uv = uv * m.uvTransform.xy + m.uvTransform.zw; return float2(uv.x, m.extra.x > 0 ? 1 - uv.y : uv.y); }
 float surfaceAlpha(Material m, float2 uv) { return m.color.a * imageSample(m.maps.x, uv).a * imageSample(m.maps.y, uv).g; }
-struct Varying { float4 position : SV_Position; float3 world : TEXCOORD0; float3 normal : TEXCOORD1; float2 uv : TEXCOORD2; float depth : TEXCOORD3; centroid float3 shadowWorld : TEXCOORD4; float3 previousWorld : TEXCOORD5; };
+struct Varying { float4 position : SV_Position; float3 world : TEXCOORD0; float3 normal : TEXCOORD1; float2 uv : TEXCOORD2; float depth : TEXCOORD3; centroid float3 shadowWorld : TEXCOORD4; float3 previousWorld : TEXCOORD5; float4 previousClip : TEXCOORD6; };
 Varying vertexMain(uint id : SV_VertexID) {
     Vertex v = vertices[id]; Varying o; o.world = o.shadowWorld = v.position; o.normal = v.normal; o.uv = v.uv;
     o.previousWorld = previousVertices[id].position;
-    float4 p = mul(view, float4(v.position, 1)); o.position = mul(projection, p); o.depth = -p.z; return o;
+    o.previousClip=mul(previousProjection,mul(previousView,float4(o.previousWorld,1)));
+    float4 p = mul(view, float4(v.position, 1)); o.position = mul(projection, p); o.depth = -p.z;
+    o.position.xy+=float2(-2,2)*aaJitter.xy/viewport.xy*o.position.w;return o;
 }
 Varying outlineVertex(uint id : SV_VertexID) {
     Varying o=vertexMain(id);float4 n=mul(projection,float4(mul((float3x3)view,o.normal),0));
     float2 direction=(n.xy*o.position.w-o.position.xy*n.w)*viewport.xy;
     if(length(direction)>0.00001)o.position.xy+=normalize(direction)*(2*misc.w/viewport.xy)*o.position.w;
+    float4 previousN=mul(previousProjection,float4(mul((float3x3)previousView,previousVertices[id].normal),0));
+    float2 previousDirection=(previousN.xy*o.previousClip.w-o.previousClip.xy*previousN.w)*viewport.xy;
+    if(length(previousDirection)>0.00001)o.previousClip.xy+=normalize(previousDirection)*(2*misc.w/viewport.xy)*o.previousClip.w;
     o.position.z+=0.00001*o.position.w;return o;
 }
 float4 outlineMain(Varying v,bool front:SV_IsFrontFace):SV_Target {
@@ -265,24 +276,27 @@ void cortao_writeResult(int2 p, float visibility, float3 bentNormal, float3x3 ba
     CORTAOMainPassParameters p = (CORTAOMainPassParameters)0;
     p.packedResolution = (uint(viewport.x) | (uint(viewport.y) << 16)); p.randomSeed = 0x7123ab49u;
     p.normalBias = (1.0 / projection[0][0]) / viewport.x * sqrt(2.0); p.radius = viewport.w;
-    p.unprojectParams = float4(2/projection[0][0], -2/projection[1][1], -1/projection[0][0], 1/projection[1][1]);
-    p.projectionParams = float4(projection[0][0] * 0.5, -projection[1][1] * 0.5, -0.5, -0.5);
+    p.unprojectParams = float4(2/projection[0][0], -2/projection[1][1], (-1+2*aaJitter.x/viewport.x)/projection[0][0], (1-2*aaJitter.y/viewport.y)/projection[1][1]);
+    p.projectionParams = float4(projection[0][0] * 0.5, -projection[1][1] * 0.5, -0.5+aaJitter.x/viewport.x, -0.5+aaJitter.y/viewport.y);
     float r = (1 / projection[1][1]) * 0.4; p.maxApparentCircleRadiusCoefficient = r / sqrt(r*r+1);
     p.mipBias = log2(projection[1][1] * viewport.y * 0.5) - 4;
     p.inverseMaxSlopeCompensation = 0.25; p.backfaceThreshold = 0.5;
     cortao_mainPass(tid.xy, p);
 }
 [numthreads(8,8,1)] void outputMain(uint3 tid : SV_DispatchThreadID) {
-    if (any(tid.xy >= uint2(viewport.xy))) return;
+    if (any(tid.xy >= uint2(aaInfo.xy))) return;
     if (ao.y > 0) {
         float visible = ao.y > 1 ? rawAO[tid.xy] : visibilityAt(int2(tid.xy));
         output[tid.xy] = float4((normalDepth[tid.xy].w > 0 ? visible : 0.14).xxx, 1); return;
     }
-    float4 hdr = hdrColor[tid.xy]; float3 rgb = gt7ToneMap(hdr.rgb / max(hdr.a, 0.00001) * settings.x);
+    float4 hdr = aaInfo.z>0?aaResult[tid.xy]:hdrColor[tid.xy];
+    hdr.a=saturate(hdr.a);
+    float3 rgb = gt7ToneMap(hdr.rgb / max(hdr.a, 0.00001) * settings.x);
     float3 bg=background.rgb;
     if(hdr.a<1 && (settings.z>0 || background.w>0)) {
         float3 origin=-mul(transpose((float3x3)view),float3(view[0][3],view[1][3],view[2][3]));
-        float2 uv=(float2(tid.xy)+0.5)/viewport.xy;
+        float2 uv=(float2(tid.xy)+0.5)/aaInfo.xy;
+        int2 inputPixel=clamp(int2(uv*viewport.xy-aaJitter.xy),0,int2(viewport.xy)-1);
         float3 direction=mul(transpose((float3x3)view),normalize(float3((uv.x*2-1)/projection[0][0],(1-uv.y*2)/projection[1][1],-1)));
         float t=(misc.x-origin.y)/direction.y;
         if(t>0 && direction.y<-0.00001) {
@@ -292,12 +306,12 @@ void cortao_writeResult(int2 p, float visibility, float3 bentNormal, float3x3 ba
                 // The analytic ground has an exact Y plane and is not in the BLAS.
                 // Snap Y to it rather than retaining the camera-ray intersection error.
                 float3 groundOrigin = float3(p.x, roundAway(misc.x, 1), p.z);
-                float groundShade = temporalInfo.w != 0 && shadowSurface[tid.xy].w == GROUND_KEY ? shadowResolved[tid.xy].x :
+                float groundShade = temporalInfo.w != 0 && shadowSurface[inputPixel].w == GROUND_KEY ? shadowResolved[inputPixel].x :
                     temporalInfo.w != 0 ? traceShadow(groundOrigin,float3(0,1,0),float2(tid.xy)).x : shadowVisibility(groundOrigin,float3(0,1,0),float2(tid.xy));
                 bg*=1-0.5*(1-groundShade)*fade;
             }
             if(background.w>0 && all(abs(coord)<grid.z*0.5)) {
-                float pixelWorld=max(t*2/(projection[1][1]*viewport.y),0.000001);
+                float pixelWorld=max(t*2/(projection[1][1]*aaInfo.y),0.000001);
                 float2 edge=abs(frac(coord/grid.w+0.5)-0.5)*grid.w;
                 float coverage=1-smoothstep(pixelWorld*0.2,pixelWorld*0.8,min(edge.x,edge.y));
                 float3 color=decodeSRGB(min(abs(coord.x),abs(coord.y))<pixelWorld?float3(90,96,112)/255.0:float3(54,58,68)/255.0);
@@ -308,3 +322,4 @@ void cortao_writeResult(int2 p, float visibility, float3 bentNormal, float3x3 ba
     rgb = lerp(bg, rgb, hdr.a);
     output[tid.xy] = float4(encodeSRGB(saturate(rgb)), 1);
 }
+#include "antialiasing.hlsl"

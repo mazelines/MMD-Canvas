@@ -10,6 +10,12 @@ PMX（MMD）モデルをプレビューし、**FBX / USD に変換**するデス
 
 [ダウンロード](https://github.com/mazelines/MMD-Canvas/releases) · [CI 結果](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [リリースガイド（韓国語）](releases.md)
 
+## v0.5.5：DLAA・DLSS
+
+既定の AA に NVIDIA DLAA を追加し、DLSS Quality・DLSS Balanced・MSAA 4× を選択できます。Lambert・Toon ともに深度とモーションベクトルを使い、EV100・GT7 より前に HDR カラーを復元します。DLAA/SR は RTX 20 シリーズ以降に対応し、実際の GPU・ドライバー対応状況を照会します。非対応 GPU では DX12 MSAA 4× を使用します。
+
+RTX 4090 で背景色・露出の保持、カメラ・ポーズ移動、CORTAO/DXR 合成、1,200 フレームの安定性を検証しました。極細の形状や透明境界には、特に Balanced でちらつきが残る場合があります。インストーラーには NVIDIA の配布用 DLL と別途の SDK ライセンスを含みます。[要件と制限（韓国語）](dlss.md) · [0.5.5 リリースノート](release-notes/v0.5.5.md)。
+
 ## v0.5.4：時間蓄積 DXR シャドウ
 
 Lambert・Toon の影を 1・2・4 本のレイで計算し、カメラ・スキニング・モーフのモーションベクトル、時間蓄積、深度・幾何法線に基づく空間フィルターで復元します。既定は 4 本で、比較用の 128 本の参照モードも利用できます。静止時は最大 32 フレームを蓄積してから再描画を停止します。影は EV100・GT7 より前にマテリアルの直接光へ適用します。[構成と制限](native-dx12.md#모션-벡터와-시간-누적-그림자)。
