@@ -10,6 +10,12 @@ A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
 
+## v0.5.4: temporal DXR shadows
+
+Lambert and Toon shadows use 1/2/4 rays, reconstructed with camera/skinning/morph motion vectors, temporal accumulation, and depth/geometric-normal-guided spatial filtering. The default is 4 rays; a 128-ray reference mode remains available. A static view accumulates up to 32 frames, then stops requesting redraws. Shadows affect direct material lighting before EV100 and GT7. [Architecture and limitations](native-dx12.md#모션-벡터와-시간-누적-그림자).
+
+In a close-up of the bundled example, native rendering dropped from about 9.8 ms with 64 rays to 1.9 ms with 4 rays and reconstruction (RTX 4090, 1280×900). Camera/pose/disocclusion regressions and a 1,200-frame stability run passed. These timings exclude presentation; secondary transparent layers and some MSAA edges can retain fine noise. [0.5.4 release notes](release-notes/v0.5.4.md).
+
 ## v0.5.3: DXR shadow acne fix
 
 Fix erroneous self-shadowing in Lambert and Toon. Shadow rays now start from the actual triangle's geometric normal with an offset based on position error, improving cases involving strong normal maps and changes in overall model size. Nearby shadows from thin surfaces such as clothing and hair are preserved.
@@ -77,7 +83,7 @@ Run `npm run test:workspace` after `npm test` to verify saving/restoring and all
 - **Animation playback:** when a loaded model carries animation clips (FBX, glTF/GLB, DAE, USD), a transport bar appears at the bottom of the viewport and playback starts. It offers play/pause, back to start, clip selection, timeline scrubbing, speed (0.25–2×), and looping; shadows and toon outlines follow the motion. PMX files contain no animation, so the bar stays hidden for them, and loading VMD motions is not supported.
 - **PMX inspection:** vertex, triangle, material, bone, morph, and texture counts; model descriptions and conversion warnings; vertex morph sliders and reset.
 - **Material inspector:** search material/mesh names; inspect color, opacity, roughness, metalness, texture previews, resolution, UV data, material slots, and triangle counts. View original PMX values separately. Toggle individual materials, isolate the selection, or show all, including on non-PMX models. Visibility changes affect previews only.
-- **Lighting and shadows:** hardware DXR soft shadows with adjustable light size and 16/64/128 rays (default 64).
+- **Lighting and shadows:** hardware DXR soft shadows with adjustable light size and 1/2/4-ray temporal quality (default 4), plus a 128-ray reference mode.
 - **Light gizmo:** translation, rotation, Local/World coordinates, and direction reset. Lighting, shadow, direction, and coordinate-space preferences are saved.
 - **Conversion:** single PMX files or entire folders, optional recursion, scale/name/morph/texture-copy options, and opening the output folder.
 

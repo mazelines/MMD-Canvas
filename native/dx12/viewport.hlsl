@@ -16,6 +16,9 @@ cbuffer Frame : register(b0) {
     float4 outlineColor;     // exposure-protected scene-linear outline RGB
     float4 grid;             // center X/Z, width, cell size
     uint4 mipInfo[8];        // width, height, packed offset, unused
+    float4x4 previousView;
+    float4x4 previousProjection;
+    uint4 temporalInfo;      // sampling frame, valid history, max history, enabled
 };
 cbuffer Draw : register(b1) { uint materialId; uint mipLevel; uint triangleOffset; uint unused1; };
 StructuredBuffer<Vertex> vertices : register(t0);
@@ -28,9 +31,26 @@ Texture2D<float> rawAO : register(t6);
 Texture3D<uint> occluderLut : register(t7);
 Texture2D<float4> images[128] : register(t8);
 Texture2D<float4> hdrColor : register(t136);
+StructuredBuffer<Vertex> previousVertices : register(t137);
+Texture2D<float4> shadowSurface : register(t138);
+Texture2D<float4> shadowMotion : register(t139);
+Texture2D<float4> shadowRaw : register(t140);
+Texture2D<float4> shadowHistory : register(t141);
+Texture2D<float4> previousSurface : register(t142);
+Texture2D<float4> shadowSpatialInput : register(t143);
+Texture2D<float4> shadowResolved : register(t144);
+Texture2D<float4> shadowGuide : register(t145);
+Texture2D<float4> shadowSpatialIntermediate : register(t146);
 RWStructuredBuffer<uint> packedOut : register(u0);
 RWTexture2D<float> aoOut : register(u1);
 RWTexture2D<float4> output : register(u2);
+RWTexture2D<float4> surfaceOut : register(u3);
+RWTexture2D<float4> motionOut : register(u4);
+RWTexture2D<float4> shadowRawOut : register(u5);
+RWTexture2D<float4> shadowSpatialOut : register(u6);
+RWTexture2D<float4> shadowHistoryOut : register(u7);
+RWTexture2D<float4> shadowGuideOut : register(u8);
+RWTexture2D<float4> shadowFinalOut : register(u9);
 SamplerState linearWrap : register(s0);
 SamplerState nearestClamp : register(s1);
 float3 decodeSRGB(float3 c) { return select(c <= 0.04045, c / 12.92, pow((c + 0.055) / 1.055, 2.4)); }
@@ -39,9 +59,10 @@ float4 imageSample(int id, float2 uv) { return id < 0 ? float4(1,1,1,1) : images
 float4 imageSurface(int id, float2 uv) { return id < 0 ? float4(1,1,1,1) : images[NonUniformResourceIndex(id)].Sample(linearWrap, uv); }
 float2 surfaceUv(Material m, float2 uv) { uv = uv * m.uvTransform.xy + m.uvTransform.zw; return float2(uv.x, m.extra.x > 0 ? 1 - uv.y : uv.y); }
 float surfaceAlpha(Material m, float2 uv) { return m.color.a * imageSample(m.maps.x, uv).a * imageSample(m.maps.y, uv).g; }
-struct Varying { float4 position : SV_Position; float3 world : TEXCOORD0; float3 normal : TEXCOORD1; float2 uv : TEXCOORD2; float depth : TEXCOORD3; centroid float3 shadowWorld : TEXCOORD4; };
+struct Varying { float4 position : SV_Position; float3 world : TEXCOORD0; float3 normal : TEXCOORD1; float2 uv : TEXCOORD2; float depth : TEXCOORD3; centroid float3 shadowWorld : TEXCOORD4; float3 previousWorld : TEXCOORD5; };
 Varying vertexMain(uint id : SV_VertexID) {
     Vertex v = vertices[id]; Varying o; o.world = o.shadowWorld = v.position; o.normal = v.normal; o.uv = v.uv;
+    o.previousWorld = previousVertices[id].position;
     float4 p = mul(view, float4(v.position, 1)); o.position = mul(projection, p); o.depth = -p.z; return o;
 }
 Varying outlineVertex(uint id : SV_VertexID) {
@@ -72,10 +93,15 @@ float3 surfaceNormal(Varying v, bool front, Material m) {
     }return n;
 }
 void cullSide(Material m, bool front) { if ((m.options.z < 0.5 && !front) || (m.options.z > 1.5 && front)) discard; }
-float4 normalMain(Varying v, bool front : SV_IsFrontFace) : SV_Target {
+struct PrepassOutput { float4 normal : SV_Target0; float4 surface : SV_Target1; float4 motion : SV_Target2; };
+PrepassOutput normalMain(Varying v, bool front : SV_IsFrontFace, uint primitive : SV_PrimitiveID) {
     Material m = materials[materialId]; cullSide(m, front); float a = surfaceAlpha(m, surfaceUv(m, v.uv));
     clip(a - max(m.options.x, m.options.y > 0 ? 0.5 : 0.001));
-    return float4(mul((float3x3)view, surfaceNormal(v, front,m)), v.depth);
+    PrepassOutput o;
+    o.normal = float4(mul((float3x3)view, surfaceNormal(v, front,m)), v.depth);
+    o.surface = float4(v.world, (front ? 1.0 : -1.0) * (triangleOffset + primitive + 1));
+    o.motion = float4(v.previousWorld, 1);
+    return o;
 }
 // Round outward after offsetting: adding a small offset to a large coordinate can
 // otherwise round back onto the surface. Use the smallest normal float at zero
@@ -92,7 +118,7 @@ float3 offsetShadowOrigin(float3 p, float3 normal, float distance) {
 struct ShadowSurface { float3 origin; float3 normal; };
 ShadowSurface triangleShadowSurface(float3 p, uint primitive, bool front) {
     // SV_PrimitiveID restarts for each material draw; the BLAS uses global indices.
-    uint3 indices = triangles[triangleOffset + primitive].xyz;
+    uint3 indices = triangles[primitive].xyz;
     float3 v0 = vertices[indices.x].position;
     precise float3 e1 = vertices[indices.y].position - v0;
     precise float3 e2 = vertices[indices.z].position - v0;
@@ -122,7 +148,7 @@ ShadowSurface triangleShadowSurface(float3 p, uint primitive, bool front) {
     surface.origin = offsetShadowOrigin(onPlane, normal, dot(error, abs(normal)));
     return surface;
 }
-bool blocked(float3 p, float3 direction) {
+float shadowHitDistance(float3 p, float3 direction) {
     RayDesc ray; ray.Origin = p; ray.Direction = direction; ray.TMin = 0; ray.TMax = max(misc.z * 8, 1);
     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
     q.TraceRayInline(scene, RAY_FLAG_NONE, 255, ray);
@@ -135,8 +161,9 @@ bool blocked(float3 p, float3 direction) {
         float2 uv = vertices[tri.x].uv * (1 - b.x - b.y) + vertices[tri.y].uv * b.x + vertices[tri.z].uv * b.y;
         if (surfaceAlpha(m, surfaceUv(m, uv)) >= max(m.options.x, 0.5)) q.CommitNonOpaqueTriangleHit();
     }
-    return q.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+    return q.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? q.CommittedRayT() : -1;
 }
+bool blocked(float3 p, float3 direction) { return shadowHitDistance(p,direction) >= 0; }
 float shadowVisibility(float3 origin, float3 geometricNormal, float2 pixel) {
     if (settings.z == 0) return 1;
     float3 l = normalize(sun.xyz), tangent = normalize(cross(abs(l.y) < 0.95 ? float3(0,1,0) : float3(1,0,0), l));
@@ -153,6 +180,7 @@ float shadowVisibility(float3 origin, float3 geometricNormal, float2 pixel) {
     }
     return visibility / samples;
 }
+#include "temporal-shadow.hlsl"
 float visibilityAt(int2 pixel) {
     if (settings.w == 0 || ao.x == 0) return 1;
     float4 center = normalDepth.Load(int3(pixel, 0));
@@ -174,9 +202,16 @@ float4 colorMain(Varying v, bool front : SV_IsFrontFace, uint primitive : SV_Pri
     float3 n = surfaceNormal(v, front,m);
     float ndl = dot(n, normalize(sun.xyz));
     float shade = 1;
-    if (settings.z != 0) {
-        ShadowSurface surface = triangleShadowSurface(v.shadowWorld, primitive, front);
-        shade = shadowVisibility(surface.origin, surface.normal, v.position.xy);
+    if (settings.z != 0 && ao.y == 0) {
+        uint globalPrimitive = triangleOffset + primitive;
+        float key = (front ? 1.0 : -1.0) * (globalPrimitive + 1);
+        if (temporalInfo.w != 0 && shadowSurface.Load(int3(int2(v.position.xy),0)).w == key)
+            shade = shadowResolved.Load(int3(int2(v.position.xy),0)).x;
+        else {
+            ShadowSurface surface = triangleShadowSurface(v.shadowWorld, globalPrimitive, front);
+            // MSAA silhouettes / secondary transparent layers have no matching history.
+            shade = temporalInfo.w != 0 ? traceShadow(surface.origin,surface.normal,v.position.xy).x : shadowVisibility(surface.origin, surface.normal, v.position.xy);
+        }
     }
     float band = settings.y > 0 ? (ndl * 0.5 + 0.5 < 0.5 ? 64.0/255.0 : 1) : max(ndl, 0);
     float direct = settings.y > 0 ? lerp(64.0/255.0, band, shade) : band * shade;
@@ -257,7 +292,9 @@ void cortao_writeResult(int2 p, float visibility, float3 bentNormal, float3x3 ba
                 // The analytic ground has an exact Y plane and is not in the BLAS.
                 // Snap Y to it rather than retaining the camera-ray intersection error.
                 float3 groundOrigin = float3(p.x, roundAway(misc.x, 1), p.z);
-                bg*=1-0.5*(1-shadowVisibility(groundOrigin,float3(0,1,0),float2(tid.xy)))*fade;
+                float groundShade = temporalInfo.w != 0 && shadowSurface[tid.xy].w == GROUND_KEY ? shadowResolved[tid.xy].x :
+                    temporalInfo.w != 0 ? traceShadow(groundOrigin,float3(0,1,0),float2(tid.xy)).x : shadowVisibility(groundOrigin,float3(0,1,0),float2(tid.xy));
+                bg*=1-0.5*(1-groundShade)*fade;
             }
             if(background.w>0 && all(abs(coord)<grid.z*0.5)) {
                 float pixelWorld=max(t*2/(projection[1][1]*viewport.y),0.000001);
