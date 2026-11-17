@@ -1,0 +1,3 @@
+# Preserve pinned third-party source bytes, including upstream comment spacing.
+renderer/vendor/nis/NIS* -text whitespace=-blank-at-eol
+licenses/NVIDIA-NIS.txt -text whitespace=-blank-at-eol

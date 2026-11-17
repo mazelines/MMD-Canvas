@@ -279,7 +279,7 @@
       "color": "#331b36"
     },
     "flags": {
-      "grid": true,
+      "grid": false,
       "skeleton": false,
       "wireframe": false
     },

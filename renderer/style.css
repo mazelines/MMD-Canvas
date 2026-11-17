@@ -89,6 +89,7 @@ aside { background: var(--panel); min-height: 0; display: flex; flex-direction: 
 #materials li { display: flex; align-items: center; gap: 5px; padding: 2px 5px; border-radius: 5px; border: 1px solid transparent; }
 #materials li.active { background: #22354c; border-color: #36577e; }
 #materials input { accent-color: var(--accent); flex: none; }
+#materials input.material-transparent { accent-color: #ffd24f; }
 .material-select { border: 0; background: none; display: flex; align-items: center; gap: 9px; padding: 5px 0; text-align: left; flex: 1; min-width: 0; }
 .material-swatch { width: 28px; height: 28px; border-radius: 6px; border: 1px solid #ffffff33; flex: none; }
 .material-label { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -171,6 +172,9 @@ aside { background: var(--panel); min-height: 0; display: flex; flex-direction: 
 .renderer-settings { width: 160px; display: flex; flex-direction: column; gap: 4px; background: #191e27ed; border: 1px solid #454e5e; padding: 6px; border-radius: 7px; }
 .renderer-settings select { width: 100%; background: #191e27; color: var(--text); border: 1px solid #454e5e; border-radius: 4px; padding: 4px; }
 .renderer-settings strong { padding: 3px; font-size: 12px; }
+.renderer-settings .sharpen-row { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+.renderer-settings .sharpen-row input[type="range"] { flex: 1; min-width: 0; accent-color: #5b95df; }
+.renderer-settings .sharpen-row output { min-width: 30px; text-align: right; font-size: 10px; color: var(--text); }
 #renderer-error { position: absolute; z-index: 12; top: 40%; left: 10%; right: 10%; padding: 18px; background: #242730; border: 1px solid #ba6666; border-radius: 8px; }
 #renderer-error p { white-space: pre-wrap; overflow-wrap: anywhere; }
 #renderer-status { font-size: 9px; color: var(--muted); line-height: 1.3; overflow-wrap: anywhere; }

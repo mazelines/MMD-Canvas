@@ -10,6 +10,12 @@
 
 [下载](https://github.com/mazelines/MMD-Canvas/releases) · [CI 结果](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [发布指南（韩语）](releases.md)
 
+## v0.5.6：网格质量与 NVIDIA 锐化
+
+修复低视角下网格线断裂、闪烁的问题。根据地面的投影大小，在输出分辨率下过滤线条，对远处密集的线条进行淡出，并平滑网格边界。网格默认关闭，首次启动的内置画布也采用该设置。半透明材质在材质列表中使用黄色复选框。
+
+新增 NVIDIA NIS NVSharpen，可在 DLAA、DLSS 和 MSAA 下将最终画面的锐化强度调整为 0–100%，默认 25%。设置保存在本机，0% 时跳过锐化步骤。锐化可能放大残留的时域波动。[实现与限制（韩语）](dlss.md) · [0.5.6 发布说明](release-notes/v0.5.6.md)。
+
 ## v0.5.5：DLAA 与 DLSS
 
 默认抗锯齿改为 NVIDIA DLAA，并可选择 DLSS Quality、DLSS Balanced 或 MSAA 4×。Lambert 和 Toon 均使用深度、运动向量，在 EV100、GT7 之前重建 HDR 颜色。DLAA/SR 支持 RTX 20 系列及更新型号，应用会查询实际 GPU 与驱动支持情况。不支持的 GPU 使用 DX12 MSAA 4×。

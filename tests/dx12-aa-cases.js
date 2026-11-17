@@ -9,6 +9,7 @@ export async function runAACases(v) {
     f.set([0.3481553,0.6963106,0.6270597,o.sun??0,1,1,1,o.ambient??0,1,1,1,0],32);
     f.set([o.size??256,o.size??256,0.08,1,o.exposure??100,o.toon??0,o.shadow??0,o.ao??0,1,o.debug??0,o.rays??4,o.wire??0],44);
     f.set([...(o.background??[0,0,0]),0,-100,10,10,0,0,0,0,o.mode??1],56);
+    f[72]=(o.sharpen??0)/100;
     const frame=await api.dx12Render(data),c=document.getElementById('dx12-canvas');
     return{frame,pixels:c.getContext('2d').getImageData(0,0,c.width,c.height).data};
   };
@@ -25,6 +26,11 @@ export async function runAACases(v) {
       backgrounds.push({background,exposure,error});
     }
   }
+  // NVSharpen adds a directional luma detail term; a flat field detects no edges,
+  // so the background must survive unchanged (±1 for float rounding).
+  const flatBase=await draw({mode:0,background:[0.2,0.4,0.8]});
+  const flatSharp=await draw({mode:0,background:[0.2,0.4,0.8],sharpen:100});
+  check(difference(flatBase.pixels,flatSharp.pixels).max<=1,'Flat background must survive sharpening: '+JSON.stringify(difference(flatBase.pixels,flatSharp.pixels)));
   const material=new THREE.MeshLambertMaterial({color:0,emissive:0xffffff,emissiveIntensity:3,side:THREE.DoubleSide});
   const scene=new THREE.Group(),bars=new THREE.Group();scene.add(bars);
   for(let i=0;i<8;i++){const bar=new THREE.Mesh(new THREE.PlaneGeometry(0.018+i*0.003,3),material);bar.position.x=(i-3.5)*0.3;bar.rotation.z=0.32;bars.add(bar)}
@@ -63,6 +69,34 @@ export async function runAACases(v) {
   check((await draw({mode:1,debug:1})).frame.antialiasing==='MSAA 4x','AO debug must bypass temporal AA');
   check((await draw({mode:1,wire:1})).frame.antialiasing==='MSAA 4x','Wireframe must bypass temporal AA');
   check((await draw({mode:1})).frame.aaReset,'Returning from debug must reset history');
+  // NVSharpen post-process on the finished composite, independent of reconstruction
+  // history. MSAA is deterministic frame-to-frame, so per-pixel properties are
+  // verified against a same-session unsharpened capture.
+  camera();bars.position.x=0;await api.dx12Pose(nativeModel(scene,true));
+  const plain=await settle({mode:1});
+  const sharp50=await draw({mode:1,sharpen:50}),sharp100=await draw({mode:1,sharpen:100});
+  check(!sharp50.frame.aaReset&&!sharp100.frame.aaReset,'Sharpen edits must not reset reconstruction history');
+  check(sharp50.frame.sharpen===50&&sharp100.frame.sharpen===100,'Frame must report the sharpen amount');
+  const edge50=difference(plain.pixels,sharp50.pixels),edge100=difference(plain.pixels,sharp100.pixels);
+  check(edge100.mean>0.5,'Sharpening must visibly crisp thin edges: '+JSON.stringify(edge100));
+  check(edge50.mean<edge100.mean,'Sharpen strength must scale monotonically: '+JSON.stringify({edge50,edge100}));
+  const msaaPlain=await draw({mode:0}),msaaSharp=await draw({mode:0,sharpen:100});
+  check(difference(msaaPlain.pixels,msaaSharp.pixels).mean>0.5,'Sharpening must also apply to the MSAA path');
+  // NVSharpen's 5x5 luma support detects no edge inside a locally flat 5x5 RGB
+  // neighborhood, so the detail term must vanish there (no halos in flat areas).
+  let flatDrift=0;const sw=256;
+  for(let y=0;y<sw;y++)for(let x=0;x<sw;x++)for(let c=0;c<3;c++){
+    let mn=255,mx=0;
+    for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){
+      const v=msaaPlain.pixels[(Math.min(sw-1,Math.max(0,y+dy))*sw+Math.min(sw-1,Math.max(0,x+dx)))*4+c];
+      mn=Math.min(mn,v);mx=Math.max(mx,v);
+    }
+    if(mn===mx&&Math.abs(msaaSharp.pixels[(y*sw+x)*4+c]-mn)>1)flatDrift++;
+  }
+  check(flatDrift===0,'Sharpening must not disturb locally flat neighborhoods: '+flatDrift);
+  const debugPlain=await draw({mode:1,debug:1}),debugSharp=await draw({mode:1,debug:1,sharpen:100});
+  check(difference(debugPlain.pixels,debugSharp.pixels).max===0,'AO debug must bypass sharpening');
+  const sharpening={edge50,edge100,flatDrift,msaa:true,debugBypass:true};
   const shaded=new THREE.Group(),diffuse=new THREE.MeshLambertMaterial({color:0xb8bdcc,side:THREE.DoubleSide});
   const floor=new THREE.Mesh(new THREE.PlaneGeometry(6,6),diffuse);floor.rotation.x=-Math.PI/2;floor.position.y=-1;shaded.add(floor);
   shaded.add(new THREE.Mesh(new THREE.SphereGeometry(1,32,20),diffuse));
@@ -80,5 +114,5 @@ export async function runAACases(v) {
     check(difference(direct,shadowed).mean>0.5,'DLAA must retain visible DXR shadows');
     shading.push({toon,ambientDarkened:darker,shadowError});
   }
-  return{backgrounds,msaaError,aaErrors,motion,shading,modeResizeExposureReset:true,debugBypass:true};
+  return{backgrounds,msaaError,aaErrors,motion,sharpening,shading,modeResizeExposureReset:true,debugBypass:true};
 }

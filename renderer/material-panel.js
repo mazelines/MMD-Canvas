@@ -25,7 +25,7 @@ export class MaterialPanel {
       this.renderList(); this.renderDetail();
     });
     this.$('texture-close').addEventListener('click', () => this.$('texture-dialog').close());
-    viewer.onMaterialsChanged = () => this.renderDetail();
+    viewer.onMaterialsChanged = () => { this.updateTransparency(); this.renderDetail(); };
     this.load();
   }
 
@@ -81,6 +81,14 @@ export class MaterialPanel {
     if (!matches) list.append(node('li', { className: 'material-empty', textContent: this.entries.length ? t('검색 결과가 없습니다.') : t('모델을 열면 재질이 표시됩니다.') }));
     this.$('material-results').textContent = t`${matches} / ${this.entries.length}개`;
     this.$('material-show-all').disabled = !this.entries.length;
+    this.updateTransparency();
+  }
+
+  updateTransparency() {
+    for (const row of this.$('materials').querySelectorAll('li[data-index]')) {
+      const material = this.entries[row.dataset.index].material;
+      row.querySelector('input').classList.toggle('material-transparent', material.transparent || material.opacity < 1);
+    }
   }
 
   renderDetail() {

@@ -97,6 +97,8 @@ export class Dx12Viewport {
   constructor(viewer, status) {
     this.viewer = viewer; this.status = status; this.enabled = false; this.busy = false; this.dirty = false; this.loadedKey = ''; this.id = 0; this.shadowSamples = 4;
     const savedAA=Number(localStorage.getItem('viewportAA')??1);this.aaMode=[0,1,2,3].includes(savedAA)?savedAA:1;
+    // Use a mild default; stored choices always win over the default.
+    const savedSharpen=Number(localStorage.getItem('viewportSharpen')??25);this.sharpen=Number.isFinite(savedSharpen)?Math.min(100,Math.max(0,Math.round(savedSharpen))):25;
     this.canvas = viewer.canvas; this.empty = new THREE.Group();
     // Canvas2D loses its pixels when Chromium's GPU process restarts. A static
     // scene otherwise has no camera/animation change to request a fresh frame.
@@ -149,7 +151,7 @@ export class Dx12Viewport {
     });return values.join('|');
   }
   frame() {
-    const v=this.viewer, out=new ArrayBuffer(292), u=new Uint32Array(out), f=new Float32Array(out,4); u[0]=++this.id;
+    const v=this.viewer, out=new ArrayBuffer(308), u=new Uint32Array(out), f=new Float32Array(out,4); u[0]=++this.id;
     v.camera.updateMatrixWorld();
     f.set(v.camera.matrixWorldInverse.elements,0);
     const projection = v.camera.projectionMatrix.clone();
@@ -170,6 +172,7 @@ export class Dx12Viewport {
     if(!v.grid.geometry.boundingBox)v.grid.geometry.computeBoundingBox();
     const gp=v.grid.geometry.attributes.position;
     f.set([v.grid.position.x,v.grid.position.z,v.grid.geometry.boundingBox.max.x*2,Math.abs(gp.getZ(4)-gp.getZ(0))||1],68);
+    f[72]=this.sharpen/100;
     return out;
   }
   drawHelpers() {
