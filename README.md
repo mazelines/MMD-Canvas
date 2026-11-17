@@ -10,6 +10,12 @@ PMX(MMD) 모델을 미리 보고 **FBX / USD로 변환**하는 데스크톱 앱�
 
 [배포 파일 다운로드](https://github.com/mazelines/MMD-Canvas/releases) · [CI 실행 결과](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [릴리스 가이드](docs/releases.md)
 
+## v0.5.5: DLAA · DLSS
+
+기본 AA로 NVIDIA DLAA를 추가하고 DLSS Quality·Balanced와 MSAA 4×를 선택할 수 있게 했습니다. HDR 색상·깊이·모션 벡터로 EV100·GT7 이전에 복원하며 Lambert·Toon 모두 적용합니다. DLAA·DLSS는 RTX 20 시리즈 이상에서 지원하며 실제 사용 가능 여부는 GPU·드라이버에서 확인합니다. 지원하지 않는 GPU에서는 DX12 MSAA 4×를 사용합니다.
+
+RTX 4090에서 배경색·노출 보존, 카메라·포즈 이동, CORTAO·DXR 합성과 1,200프레임 안정성 검증을 통과했습니다. 아주 가는 형상과 투명 경계에는 특히 Balanced에서 흔들림이 남을 수 있습니다. NVIDIA 배포 DLL과 별도 SDK 라이선스를 설치 파일에 포함합니다. [지원 조건·구조·제한](docs/dlss.md) · [0.5.5 변경 내용](docs/release-notes/v0.5.5.md).
+
 ## v0.5.4: 시간 누적 DXR 그림자
 
 Lambert·Toon의 그림자를 1·2·4광선으로 계산하고, 카메라·스키닝·모프의 모션 벡터, 시간 누적, 깊이·기하 법선 기반 공간 필터로 복원합니다. 기본값은 4광선이며 128광선 참조 모드도 제공합니다. 정지 시 최대 32프레임을 누적한 뒤 추가 렌더링을 멈춥니다. 그림자는 재질의 직접광에 EV100·GT7 전에 적용합니다. [구조와 제한](docs/native-dx12.md#모션-벡터와-시간-누적-그림자).

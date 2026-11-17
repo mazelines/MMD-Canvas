@@ -107,7 +107,7 @@ function buildMenu() {
       label: t('도움말'),
       submenu: [{
         label: t('MMD Canvas 정보'),
-        click: () => dialog.showMessageBox(win, { type: 'info', title: t('MMD Canvas 정보'), message: 'MMD Canvas', detail: t`버전 ${app.getVersion()}` }),
+        click: () => dialog.showMessageBox(win, { type: 'info', title: t('MMD Canvas 정보'), message: 'MMD Canvas', detail: t`버전 ${app.getVersion()}` + '\n\nNVIDIA RTX™ DLSS / NVIDIA NGX SDK\nCopyright © NVIDIA Corporation. All rights reserved.\nNVIDIA SDK license: licenses/NVIDIA-DLSS.txt' }),
       }],
     },
   ]);

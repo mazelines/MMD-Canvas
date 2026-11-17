@@ -10,6 +10,12 @@ A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
 
+## v0.5.5: DLAA and DLSS
+
+NVIDIA DLAA is the default AA, with DLSS Quality, DLSS Balanced and MSAA 4× options. Lambert and Toon reconstruct HDR color using depth and motion vectors before EV100 and GT7. DLAA/SR support RTX 20-series and newer; the app queries actual GPU/driver availability. Unsupported GPUs use DX12 MSAA 4×.
+
+RTX 4090 tests cover background/exposure preservation, camera/pose motion, CORTAO/DXR composition and 1,200 frames of stability. Very thin geometry and transparent edges may shimmer, especially in Balanced. The installer includes NVIDIA's distribution DLL and separate SDK license. [Requirements and limitations (Korean)](dlss.md) · [0.5.5 release notes](release-notes/v0.5.5.md).
+
 ## v0.5.4: temporal DXR shadows
 
 Lambert and Toon shadows use 1/2/4 rays, reconstructed with camera/skinning/morph motion vectors, temporal accumulation, and depth/geometric-normal-guided spatial filtering. The default is 4 rays; a 128-ray reference mode remains available. A static view accumulates up to 32 frames, then stops requesting redraws. Shadows affect direct material lighting before EV100 and GT7. [Architecture and limitations](native-dx12.md#모션-벡터와-시간-누적-그림자).

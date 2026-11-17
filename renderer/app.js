@@ -24,6 +24,10 @@ localStorage.removeItem('viewportBackend');
 $('renderer-retry').addEventListener('click', () => viewer.dx12.start());
 void viewer.dx12.start();
 $('dxr-quality').addEventListener('change', () => { viewer.dx12.shadowSamples = Number($('dxr-quality').value); viewer.requestRender(); });
+$('viewport-aa').addEventListener('change',()=>{
+  viewer.dx12.aaMode=Number($('viewport-aa').value);localStorage.setItem('viewportAA',String(viewer.dx12.aaMode));
+  if(!viewer.dx12.enabled)void viewer.dx12.start();else viewer.requestRender();
+});
 const materialPanel = new MaterialPanel(viewer);
 const applyRenderMode = (mode, save = false) => {
   viewer.setRenderMode(mode);

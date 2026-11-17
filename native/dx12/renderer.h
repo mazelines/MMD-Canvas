@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include "dlss.h"
 
 struct NativeVertex { float p[3], n[3], uv[2]; };
 struct NativeTriangle { uint32_t a,b,c,material; };
@@ -18,10 +19,13 @@ struct Reader {
 };
 struct NativeRenderer {
     Device& d; std::filesystem::path directory; HANDLE parent = nullptr, remoteHandle = nullptr;
+    Dlss dlss;
     ComPtr<ID3D12RootSignature> root;
     ComPtr<ID3D12DescriptorHeap> descriptors, rtvs, dsvs;
     ComPtr<ID3D12PipelineState> normalPso, colorPso, transparentPso, outlinePso, wirePso, packPso, mipPso, aoPso, outputPso;
     ComPtr<ID3D12PipelineState> shadowTracePso, shadowTemporalPso, shadowSpatialPso, shadowFinalPso;
+    ComPtr<ID3D12PipelineState> aaColorPso, aaTransparentPso, aaOutlinePso, aaPreparePso;
+    ComPtr<ID3D12Resource> aaOutput, aaMotion, aaDepth, aaExposure;
     ComPtr<ID3D12Resource> vertexBuffer, triangleBuffer, materialBuffer, indexBuffer, blas, tlas, scratch, instances, constants;
     ComPtr<ID3D12Resource> normal, depth, hdr, hdrMs, depthMs, packedBuffer, aoTexture, sharedOutput, lut;
     ComPtr<ID3D12Resource> previousVertexBuffer, motion, shadowRawTexture, shadowGuideTexture;
@@ -29,6 +33,10 @@ struct NativeRenderer {
     std::array<float,72> previousFrame{};
     uint32_t shadowIndex=0, samplingFrame=0, stableFrames=0;
     bool historyValid=false, poseChanged=false;
+    bool aaHistoryValid=false;
+    uint32_t outputWidth=0,outputHeight=0,colorSamples=4,aaStableFrames=0,aaSampleFrame=0;
+    float previousJitter[2]{};
+    std::chrono::steady_clock::time_point lastRender=std::chrono::steady_clock::now();
     std::vector<ComPtr<ID3D12Resource>> images, uploads;
     std::vector<NativeTriangle> triangles;
     std::vector<NativeMaterial> materials;
@@ -39,18 +47,18 @@ struct NativeRenderer {
     bool hasModel = false;
     bool outlines = false;
     bool wireframe = false;
-    explicit NativeRenderer(Device& device, const std::filesystem::path& dir, DWORD parentPid) : d(device), directory(dir) {
+    explicit NativeRenderer(Device& device, const std::filesystem::path& dir, DWORD parentPid) : d(device), directory(dir), dlss(device,dir) {
         parent = OpenProcess(PROCESS_DUP_HANDLE, FALSE, parentPid);
         if (!parent) throw std::runtime_error("Cannot share textures with the host process");
-        D3D12_DESCRIPTOR_HEAP_DESC h{}; h.NumDescriptors = 176; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV; h.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        D3D12_DESCRIPTOR_HEAP_DESC h{}; h.NumDescriptors = 173; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV; h.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
         check(d.device->CreateDescriptorHeap(&h, IID_PPV_ARGS(&descriptors)), "Create descriptors");
         descriptorSize = d.device->GetDescriptorHandleIncrementSize(h.Type);
-        h = {}; h.NumDescriptors = 5; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+        h = {}; h.NumDescriptors = 7; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
         check(d.device->CreateDescriptorHeap(&h, IID_PPV_ARGS(&rtvs)), "Create render target views"); rtvSize = d.device->GetDescriptorHandleIncrementSize(h.Type);
         h.NumDescriptors = 2; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
         check(d.device->CreateDescriptorHeap(&h, IID_PPV_ARGS(&dsvs)), "Create depth view");
         D3D12_DESCRIPTOR_RANGE ranges[2]{};
-        ranges[0] = {D3D12_DESCRIPTOR_RANGE_TYPE_SRV,147,0,0,0}; ranges[1] = {D3D12_DESCRIPTOR_RANGE_TYPE_UAV,10,0,0,0};
+        ranges[0] = {D3D12_DESCRIPTOR_RANGE_TYPE_SRV,148,0,0,0}; ranges[1] = {D3D12_DESCRIPTOR_RANGE_TYPE_UAV,13,0,0,0};
         D3D12_ROOT_PARAMETER params[4]{};
         params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV; params[0].Descriptor.ShaderRegister = 0;
         params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS; params[1].Constants = {1,0,4};
@@ -64,11 +72,13 @@ struct NativeRenderer {
         normalPso = graphics("normalMain", false, true); colorPso = graphics("colorMain", true, true); transparentPso = graphics("colorMain", true, false);
         outlinePso = graphics("outlineMain", true, false, "outlineVertex");
         wirePso = graphics("colorMain", true, true, "vertexMain", true);
+        aaColorPso=graphics("aaColorMain",true,true);aaTransparentPso=graphics("aaColorMain",true,false);aaOutlinePso=graphics("aaOutlineMain",true,false,"outlineVertex");
+        aaPreparePso=compute("aaPrepareMain");
         packPso = compute("packMain"); mipPso = compute("mipMain"); aoPso = compute("cortaoMain"); outputPso = compute("outputMain");
         shadowTracePso=compute("shadowTraceMain");shadowTemporalPso=compute("shadowTemporalMain");shadowSpatialPso=compute("shadowSpatialMain");shadowFinalPso=compute("shadowSpatialFinalMain");
         constants = buffer(768,D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
         // Populate unused descriptors, including texture slots, with safe null resources.
-        for(uint32_t i=0;i<147;i++) { D3D12_SHADER_RESOURCE_VIEW_DESC v{}; v.Format=DXGI_FORMAT_R8G8B8A8_UNORM; v.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D; v.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; v.Texture2D.MipLevels=1; d.device->CreateShaderResourceView(nullptr,&v,cpu(i)); }
+        for(uint32_t i=0;i<148;i++) { D3D12_SHADER_RESOURCE_VIEW_DESC v{}; v.Format=DXGI_FORMAT_R8G8B8A8_UNORM; v.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D; v.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; v.Texture2D.MipLevels=1; d.device->CreateShaderResourceView(nullptr,&v,cpu(i)); }
         std::ifstream in(directory / "32x32x24x32_R32_UINT.bin",std::ios::binary);
         std::vector<uint8_t> table((std::istreambuf_iterator<char>(in)),{}); if(table.size()!=98304) throw std::runtime_error("CORTAO lookup table is missing");
         d.begin(); lut = texture(32,32,DXGI_FORMAT_R32_UINT,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST,24);
@@ -85,16 +95,16 @@ struct NativeRenderer {
         // Rotate released surfaces so Chromium's compositor does not keep sampling
         // the resource it displayed for the preceding frame.
         if(sharedFrames.size()>=3) {
-            for(auto& f:sharedFrames)if(!f.busy&&f.w==width&&f.h==height&&(!frame||f.id<frame->id))frame=&f;
+            for(auto& f:sharedFrames)if(!f.busy&&f.w==outputWidth&&f.h==outputHeight&&(!frame||f.id<frame->id))frame=&f;
             if(!frame)for(auto& f:sharedFrames)if(!f.busy&&(!frame||f.id<frame->id))frame=&f;
         }
         if(!frame){if(sharedFrames.size()>=8)throw std::runtime_error("Shared texture consumer has not released frames");sharedFrames.emplace_back();frame=&sharedFrames.back();}
-        if(!frame->texture||frame->w!=width||frame->h!=height){
+        if(!frame->texture||frame->w!=outputWidth||frame->h!=outputHeight){
             closeHandle(frame->handle);frame->handle=nullptr;
-            frame->texture=texture(width,height,DXGI_FORMAT_R8G8B8A8_UNORM,D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET|D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS|D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS,D3D12_RESOURCE_STATE_COMMON,1,true);
+            frame->texture=texture(outputWidth,outputHeight,DXGI_FORMAT_R8G8B8A8_UNORM,D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET|D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS|D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS,D3D12_RESOURCE_STATE_COMMON,1,true);
             HANDLE local=nullptr;check(d.device->CreateSharedHandle(frame->texture.Get(),nullptr,GENERIC_ALL,nullptr,&local),"Export shared texture");
             BOOL ok=DuplicateHandle(GetCurrentProcess(),local,parent,&frame->handle,0,FALSE,DUPLICATE_SAME_ACCESS);CloseHandle(local);if(!ok)throw std::runtime_error("Export texture handle failed");
-            frame->w=width;frame->h=height;
+            frame->w=outputWidth;frame->h=outputHeight;
         }
         frame->id=id;frame->busy=true;sharedOutput=frame->texture;remoteHandle=frame->handle;textureView(sharedOutput.Get(),162,true);
     }
@@ -106,10 +116,10 @@ struct NativeRenderer {
         D3D12_RESOURCE_DESC desc{}; desc.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER; desc.Width=std::max(uint64_t(256),size); desc.Height=1; desc.DepthOrArraySize=1; desc.MipLevels=1; desc.SampleDesc.Count=1; desc.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR; desc.Flags=flags;
         ComPtr<ID3D12Resource> result; check(d.device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&desc,state,nullptr,IID_PPV_ARGS(&result)),"Create buffer"); return result;
     }
-    ComPtr<ID3D12Resource> texture(uint32_t w,uint32_t h,DXGI_FORMAT format,D3D12_RESOURCE_FLAGS flags,D3D12_RESOURCE_STATES state,uint16_t slices=1,bool shared=false,uint16_t mips=1,uint32_t samples=1) {
+    ComPtr<ID3D12Resource> texture(uint32_t w,uint32_t h,DXGI_FORMAT format,D3D12_RESOURCE_FLAGS flags,D3D12_RESOURCE_STATES state,uint16_t slices=1,bool shared=false,uint16_t mips=1,uint32_t samples=1,float clearColor=0) {
         D3D12_HEAP_PROPERTIES heap{}; heap.Type=D3D12_HEAP_TYPE_DEFAULT;
         D3D12_RESOURCE_DESC desc{}; desc.Dimension=slices>1?D3D12_RESOURCE_DIMENSION_TEXTURE3D:D3D12_RESOURCE_DIMENSION_TEXTURE2D; desc.Width=w; desc.Height=h; desc.DepthOrArraySize=slices; desc.MipLevels=mips; desc.Format=format; desc.SampleDesc.Count=samples; desc.Flags=flags;
-        D3D12_CLEAR_VALUE clear{};clear.Format=format;if(flags&D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL)clear.DepthStencil.Depth=1;
+        D3D12_CLEAR_VALUE clear{};clear.Format=format;for(float& c:clear.Color)c=clearColor;if(flags&D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL)clear.DepthStencil={1,0};
         auto clearPtr=(flags&(D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET|D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL))?&clear:nullptr;
         ComPtr<ID3D12Resource> result; check(d.device->CreateCommittedResource(&heap,shared?D3D12_HEAP_FLAG_SHARED:D3D12_HEAP_FLAG_NONE,&desc,state,clearPtr,IID_PPV_ARGS(&result)),"Create texture"); return result;
     }
@@ -144,6 +154,11 @@ struct NativeRenderer {
         p.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE; p.NumRenderTargets=1; p.RTVFormats[0]=DXGI_FORMAT_R16G16B16A16_FLOAT; p.DSVFormat=DXGI_FORMAT_D32_FLOAT; p.SampleDesc.Count=blend?4:1; p.SampleMask=UINT_MAX;
         if(std::strcmp(pixel,"normalMain")==0) {
             p.NumRenderTargets=3;p.RTVFormats[1]=p.RTVFormats[2]=DXGI_FORMAT_R32G32B32A32_FLOAT;
+        }
+        if(std::strcmp(pixel,"aaColorMain")==0||std::strcmp(pixel,"aaOutlineMain")==0) {
+            p.SampleDesc.Count=1;p.NumRenderTargets=3;p.RTVFormats[1]=DXGI_FORMAT_R16G16_FLOAT;p.RTVFormats[2]=DXGI_FORMAT_R32_FLOAT;
+            p.BlendState.IndependentBlendEnable=TRUE;
+            for(int i=1;i<3;i++){p.BlendState.RenderTarget[i]=b;p.BlendState.RenderTarget[i].BlendEnable=FALSE;}
         }
         ComPtr<ID3D12PipelineState> result; check(d.device->CreateGraphicsPipelineState(&p,IID_PPV_ARGS(&result)),pixel); return result;
     }
@@ -188,7 +203,7 @@ struct NativeRenderer {
             }
             transition(tex.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_GENERIC_READ);textureView(tex.Get(),8+i);images.push_back(tex); }
         buildAcceleration(); d.submit(); uploads.clear(); hasModel=true;
-        previousVertexBuffer=vertexBuffer;historyValid=false;stableFrames=0;poseChanged=false;
+        previousVertexBuffer=vertexBuffer;historyValid=false;stableFrames=0;poseChanged=false;aaHistoryValid=false;aaStableFrames=0;
     }
     void updatePose(const std::vector<uint8_t>& packet) {
         if(!hasModel || packet.size()!=size_t(vertexCount)*sizeof(NativeVertex))throw std::runtime_error("Invalid pose vertex count");
@@ -210,12 +225,13 @@ struct NativeRenderer {
         build={}; build.Inputs=in; build.DestAccelerationStructureData=tlas->GetGPUVirtualAddress(); build.ScratchAccelerationStructureData=scratch->GetGPUVirtualAddress(); d.list->BuildRaytracingAccelerationStructure(&build,0,nullptr); uavBarrier(tlas.Get());
         D3D12_SHADER_RESOURCE_VIEW_DESC srv{}; srv.ViewDimension=D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE; srv.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; srv.RaytracingAccelerationStructure.Location=tlas->GetGPUVirtualAddress(); d.device->CreateShaderResourceView(nullptr,&srv,cpu(3));
     }
-    void resize(uint32_t w,uint32_t h) {
-        if(w==width&&h==height)return; if(!w||!h||w>4096||h>4096) throw std::runtime_error("Unsupported viewport size"); width=w;height=h;
+    void resize(uint32_t w,uint32_t h,uint32_t ow,uint32_t oh,uint32_t samples) {
+        if(w==width&&h==height&&ow==outputWidth&&oh==outputHeight&&samples==colorSamples)return;
+        if(!w||!h||w>4096||h>4096)throw std::runtime_error("Unsupported viewport size");width=w;height=h;outputWidth=ow;outputHeight=oh;colorSamples=samples;
         normal=texture(w,h,DXGI_FORMAT_R16G16B16A16_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_GENERIC_READ);
         hdr=texture(w,h,DXGI_FORMAT_R16G16B16A16_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_GENERIC_READ);
-        hdrMs=texture(w,h,DXGI_FORMAT_R16G16B16A16_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_RESOLVE_SOURCE,1,false,1,4);
-        depthMs=texture(w,h,DXGI_FORMAT_D32_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,D3D12_RESOURCE_STATE_DEPTH_WRITE,1,false,1,4);
+        hdrMs.Reset();if(samples==4)hdrMs=texture(w,h,DXGI_FORMAT_R16G16B16A16_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_RESOLVE_SOURCE,1,false,1,4);
+        depthMs=texture(w,h,DXGI_FORMAT_D32_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,D3D12_RESOURCE_STATE_DEPTH_WRITE,1,false,1,samples);
         depth=texture(w,h,DXGI_FORMAT_D32_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,D3D12_RESOURCE_STATE_DEPTH_WRITE);
         aoTexture=texture(w,h,DXGI_FORMAT_R32_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_GENERIC_READ);
         const auto rw=D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
@@ -232,12 +248,19 @@ struct NativeRenderer {
         textureView(motion.Get(),139);textureView(shadowRawTexture.Get(),140);textureView(shadowFilters[1].Get(),144);textureView(shadowGuideTexture.Get(),145);
         textureView(motion.Get(),164,true);textureView(shadowRawTexture.Get(),165,true);textureView(shadowGuideTexture.Get(),168,true);
         textureView(shadowFilters[0].Get(),146);textureView(shadowFilters[0].Get(),166,true);textureView(shadowFilters[1].Get(),169,true);
-        historyValid=false;stableFrames=0;
+        aaOutput=texture(ow,oh,DXGI_FORMAT_R16G16B16A16_FLOAT,rw,D3D12_RESOURCE_STATE_GENERIC_READ);
+        aaMotion=texture(w,h,DXGI_FORMAT_R16G16_FLOAT,rw|D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_GENERIC_READ);
+        aaDepth=texture(w,h,DXGI_FORMAT_R32_FLOAT,rw|D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_GENERIC_READ,1,false,1,1,1);
+        aaExposure=texture(1,1,DXGI_FORMAT_R32_FLOAT,rw,D3D12_RESOURCE_STATE_GENERIC_READ);
+        textureView(aaOutput.Get(),147);
+        textureView(aaMotion.Get(),170,true);textureView(aaDepth.Get(),171,true);textureView(aaExposure.Get(),172,true);
+        d.device->CreateRenderTargetView(aaMotion.Get(),nullptr,rtv(5));d.device->CreateRenderTargetView(aaDepth.Get(),nullptr,rtv(6));
+        historyValid=false;stableFrames=0;aaHistoryValid=false;aaStableFrames=0;
         uint32_t total=0; for(uint32_t i=0;i<8;i++) { uint32_t mw=std::max(1u,w>>i),mh=std::max(1u,h>>i); mipInfo[i*4]=mw;mipInfo[i*4+1]=mh;mipInfo[i*4+2]=total;total+=mw*mh; }
         packedBuffer=buffer(size_t(total)*4,D3D12_HEAP_TYPE_DEFAULT,D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
         structured(packedBuffer.Get(),5,total,4);structured(packedBuffer.Get(),160,total,4,true);
         textureView(normal.Get(),4);textureView(aoTexture.Get(),6);textureView(hdr.Get(),136);textureView(aoTexture.Get(),161,true);
-        d.device->CreateRenderTargetView(normal.Get(),nullptr,rtv(0));d.device->CreateRenderTargetView(hdrMs.Get(),nullptr,rtv(1));d.device->CreateDepthStencilView(depth.Get(),nullptr,dsvs->GetCPUDescriptorHandleForHeapStart());
+        d.device->CreateRenderTargetView(normal.Get(),nullptr,rtv(0));d.device->CreateRenderTargetView(samples==1?hdr.Get():hdrMs.Get(),nullptr,rtv(1));d.device->CreateDepthStencilView(depth.Get(),nullptr,dsvs->GetCPUDescriptorHandleForHeapStart());
         auto z=dsvs->GetCPUDescriptorHandleForHeapStart();z.ptr+=d.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);d.device->CreateDepthStencilView(depthMs.Get(),nullptr,z);
     }
     void bindings(bool graphicsPass) {
@@ -252,14 +275,18 @@ struct NativeRenderer {
             D3D12_CPU_DESCRIPTOR_HANDLE targets[]{target,rtv(2+shadowIndex),rtv(4)};
             d.list->OMSetRenderTargets(3,targets,FALSE,&z);d.list->ClearRenderTargetView(targets[1],clear,0,nullptr);d.list->ClearRenderTargetView(targets[2],clear,0,nullptr);
         }
+        else if(colorSamples==1) {
+            D3D12_CPU_DESCRIPTOR_HANDLE targets[]{target,rtv(5),rtv(6)};float farDepth[4]{1,1,1,1};
+            d.list->OMSetRenderTargets(3,targets,FALSE,&z);d.list->ClearRenderTargetView(targets[1],clear,0,nullptr);d.list->ClearRenderTargetView(targets[2],farDepth,0,nullptr);
+        }
         D3D12_INDEX_BUFFER_VIEW ib{indexBuffer->GetGPUVirtualAddress(),UINT(triangles.size()*12),DXGI_FORMAT_R32_UINT};d.list->IASetIndexBuffer(&ib);d.list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         for(int pass=0;pass<(normals?1:2);pass++) for(size_t start=0;start<triangles.size();) {
             size_t end=start+1;uint32_t mat=triangles[start].material;while(end<triangles.size()&&triangles[end].material==mat)end++;
             bool transparent=materials[mat].options[1]>0;
-            if(normals||int(transparent)==pass) { d.list->SetPipelineState(normals?normalPso.Get():wireframe?wirePso.Get():materials[mat].extra[3]>0?colorPso.Get():transparentPso.Get());uint32_t values[4]{mat,0,UINT(start),0};d.list->SetGraphicsRoot32BitConstants(1,4,values,0);d.list->DrawIndexedInstanced(UINT((end-start)*3),1,UINT(start*3),0,0); }
+            if(normals||int(transparent)==pass) { d.list->SetPipelineState(normals?normalPso.Get():wireframe?wirePso.Get():colorSamples==1?(materials[mat].extra[3]>0?aaColorPso.Get():aaTransparentPso.Get()):(materials[mat].extra[3]>0?colorPso.Get():transparentPso.Get()));uint32_t values[4]{mat,0,UINT(start),0};d.list->SetGraphicsRoot32BitConstants(1,4,values,0);d.list->DrawIndexedInstanced(UINT((end-start)*3),1,UINT(start*3),0,0); }
             start=end;
         }
-        if(!normals&&outlines){d.list->SetPipelineState(outlinePso.Get());for(size_t start=0;start<triangles.size();){size_t end=start+1;uint32_t mat=triangles[start].material;while(end<triangles.size()&&triangles[end].material==mat)end++;uint32_t values[4]{mat,0,0,0};d.list->SetGraphicsRoot32BitConstants(1,4,values,0);d.list->DrawIndexedInstanced(UINT((end-start)*3),1,UINT(start*3),0,0);start=end;}}
+        if(!normals&&outlines){d.list->SetPipelineState(colorSamples==1?aaOutlinePso.Get():outlinePso.Get());for(size_t start=0;start<triangles.size();){size_t end=start+1;uint32_t mat=triangles[start].material;while(end<triangles.size()&&triangles[end].material==mat)end++;uint32_t values[4]{mat,0,0,0};d.list->SetGraphicsRoot32BitConstants(1,4,values,0);d.list->DrawIndexedInstanced(UINT((end-start)*3),1,UINT(start*3),0,0);start=end;}}
     }
     void denoiseShadows() {
         bindings(false);
@@ -275,25 +302,53 @@ struct NativeRenderer {
             transition(shadowFilters[i].Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_GENERIC_READ);
         }
     }
+    void reconstructAA(float jitterX,float jitterY,bool reset,float milliseconds) {
+        bindings(false);
+        for(auto* resource:{aaExposure.Get(),aaDepth.Get(),aaMotion.Get()})transition(resource,D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        d.list->SetPipelineState(aaPreparePso.Get());d.list->Dispatch((width+7)/8,(height+7)/8,1);
+        for(auto* resource:{aaExposure.Get(),aaDepth.Get(),aaMotion.Get()})transition(resource,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_GENERIC_READ);
+        transition(aaOutput.Get(),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        dlss.evaluate(hdr.Get(),aaDepth.Get(),aaMotion.Get(),aaExposure.Get(),aaOutput.Get(),jitterX,jitterY,reset,milliseconds);
+        transition(aaOutput.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_GENERIC_READ);
+        // NGX changes root signatures/descriptor heaps; output must rebind all its state.
+        bindings(false);
+    }
+    static float halton(uint32_t index,uint32_t base){float result=0,f=1;while(index){f/=float(base);result+=f*(index%base);index/=base;}return result;}
     std::string render(const std::vector<uint8_t>& packet) {
         if(!hasModel)throw std::runtime_error("Load a model before rendering");Reader r{packet};uint32_t id=r.u32();float frame[72];memcpy(frame,r.take(sizeof(frame)),sizeof(frame));
         wireframe=frame[55]>0;outlines=frame[49]>0&&frame[63]>0&&!wireframe;
-        for(float f:frame) if(!std::isfinite(f)) throw std::runtime_error("Invalid frame constants");resize(uint32_t(frame[44]),uint32_t(frame[45]));
+        for(float f:frame)if(!std::isfinite(f))throw std::runtime_error("Invalid frame constants");
+        if(frame[44]<1||frame[45]<1||frame[44]>4096||frame[45]>4096)throw std::runtime_error("Unsupported viewport size");
+        uint32_t ow=uint32_t(frame[44]),oh=uint32_t(frame[45]);
+        uint32_t requested=frame[53]>0||wireframe?0u:uint32_t(std::clamp(frame[67],0.0f,3.0f));
+        bool modeChanged=dlss.configure(requested,ow,oh),aaActive=dlss.mode!=0;
+        resize(dlss.inputWidth,dlss.inputHeight,ow,oh,aaActive?1:4);
+        frame[44]=float(width);frame[45]=float(height);frame[63]*=float(width)/ow;
         acquireOutput(id);
         bool temporal=frame[50]>0&&frame[54]>=1&&frame[54]<=4&&frame[53]==0&&!wireframe;
         bool cameraChanged=std::memcmp(frame,previousFrame.data(),32*sizeof(float))!=0;
+        bool appearanceChanged=std::memcmp(frame+32,previousFrame.data()+32,40*sizeof(float))!=0;
+        bool aaReset=!aaHistoryValid||modeChanged||appearanceChanged;
         bool invalidate=!historyValid;
         for(int i:{32,33,34,46,50,54,60})if(std::abs(frame[i]-previousFrame[i])>0.000001f)invalidate=true;
-        for(int i=16;i<32;i++)if(std::abs(frame[i]-previousFrame[i])>0.0001f)invalidate=true;
+        for(int i=16;i<32;i++)if(std::abs(frame[i]-previousFrame[i])>0.0001f)invalidate=aaReset=true;
         // Large camera cuts do not borrow unrelated history. Normal orbit/pan uses reprojection.
-        for(int i=0;i<12;i++)if(std::abs(frame[i]-previousFrame[i])>0.5f)invalidate=true;
+        for(int i=0;i<12;i++)if(std::abs(frame[i]-previousFrame[i])>0.5f)invalidate=aaReset=true;
+        for(int i=12;i<15;i++)if(std::abs(frame[i]-previousFrame[i])>std::max(frame[62]*0.5f,0.001f))aaReset=true;
         if(invalidate||cameraChanged||poseChanged||!temporal)stableFrames=0;
+        if(aaReset||cameraChanged||poseChanged||!aaActive)aaStableFrames=0;
+        if(aaReset)aaSampleFrame=0;
+        uint32_t phases=uint32_t(std::ceil(8.0f*float(ow)*oh/(float(width)*height)));
+        uint32_t phase=(aaSampleFrame++%phases)+1;
+        float jitter[4]{aaActive?halton(phase,2)-0.5f:0,aaActive?halton(phase,3)-0.5f:0,aaActive?previousJitter[0]:0,aaActive?previousJitter[1]:0};
+        float aaParams[4]{float(ow),float(oh),aaActive?1.0f:0.0f,aaActive?std::log2(float(width)/ow):0.0f};
         uint32_t info[4]{samplingFrame++,invalidate?0u:1u,poseChanged?4u:32u,temporal?1u:0u};
         structured(previousVertexBuffer.Get(),137,vertexCount,32);
         textureView(surfaces[shadowIndex].Get(),138);textureView(surfaces[1-shadowIndex].Get(),142);textureView(surfaces[shadowIndex].Get(),163,true);
         textureView(shadowHistories[1-shadowIndex].Get(),141);textureView(shadowHistories[shadowIndex].Get(),143);textureView(shadowHistories[shadowIndex].Get(),167,true);
         void* mapped=nullptr;check(constants->Map(0,nullptr,&mapped),"Map constants");memcpy(mapped,frame,sizeof(frame));memcpy((uint8_t*)mapped+sizeof(frame),mipInfo.data(),sizeof(mipInfo));
-        memcpy((uint8_t*)mapped+416,previousFrame.data(),128);memcpy((uint8_t*)mapped+544,info,sizeof(info));constants->Unmap(0,nullptr);
+        memcpy((uint8_t*)mapped+416,previousFrame.data(),128);memcpy((uint8_t*)mapped+544,info,sizeof(info));
+        memcpy((uint8_t*)mapped+560,aaParams,sizeof(aaParams));memcpy((uint8_t*)mapped+576,jitter,sizeof(jitter));constants->Unmap(0,nullptr);
         auto began=std::chrono::steady_clock::now();d.begin();
         for(auto* resource:{normal.Get(),surfaces[shadowIndex].Get(),motion.Get()})transition(resource,D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_RENDER_TARGET);
         draw(true);
@@ -302,10 +357,21 @@ struct NativeRenderer {
         bindings(false);transition(packedBuffer.Get(),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);d.list->SetPipelineState(packPso.Get());d.list->Dispatch((width+7)/8,(height+7)/8,1);uavBarrier(packedBuffer.Get());
         for(uint32_t i=1;i<8;i++) {uint32_t values[4]{0,i,0,0};d.list->SetComputeRoot32BitConstants(1,4,values,0);d.list->SetPipelineState(mipPso.Get());d.list->Dispatch((mipInfo[i*4]+7)/8,(mipInfo[i*4+1]+7)/8,1);uavBarrier(packedBuffer.Get());}
         transition(packedBuffer.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_GENERIC_READ);transition(aoTexture.Get(),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);d.list->SetPipelineState(aoPso.Get());d.list->Dispatch((width+7)/8,(height+7)/8,1);transition(aoTexture.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_GENERIC_READ);
-        transition(hdrMs.Get(),D3D12_RESOURCE_STATE_RESOLVE_SOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET);draw(false);transition(hdrMs.Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_RESOLVE_SOURCE);transition(hdr.Get(),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_RESOLVE_DEST);d.list->ResolveSubresource(hdr.Get(),0,hdrMs.Get(),0,DXGI_FORMAT_R16G16B16A16_FLOAT);transition(hdr.Get(),D3D12_RESOURCE_STATE_RESOLVE_DEST,D3D12_RESOURCE_STATE_GENERIC_READ);
-        bindings(false);transition(sharedOutput.Get(),D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);d.list->SetPipelineState(outputPso.Get());d.list->Dispatch((width+7)/8,(height+7)/8,1);transition(sharedOutput.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_COMMON);d.submit();
+        if(aaActive) {
+            for(auto* resource:{hdr.Get(),aaMotion.Get(),aaDepth.Get()})transition(resource,D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_RENDER_TARGET);
+            draw(false);
+            for(auto* resource:{hdr.Get(),aaMotion.Get(),aaDepth.Get()})transition(resource,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_GENERIC_READ);
+            float milliseconds=std::clamp(std::chrono::duration<float,std::milli>(began-lastRender).count(),1.0f,100.0f);
+            reconstructAA(jitter[0],jitter[1],aaReset,milliseconds);
+        } else {
+            transition(hdrMs.Get(),D3D12_RESOURCE_STATE_RESOLVE_SOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET);draw(false);transition(hdrMs.Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_RESOLVE_SOURCE);transition(hdr.Get(),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_RESOLVE_DEST);d.list->ResolveSubresource(hdr.Get(),0,hdrMs.Get(),0,DXGI_FORMAT_R16G16B16A16_FLOAT);transition(hdr.Get(),D3D12_RESOURCE_STATE_RESOLVE_DEST,D3D12_RESOURCE_STATE_GENERIC_READ);
+        }
+        bindings(false);transition(sharedOutput.Get(),D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);d.list->SetPipelineState(outputPso.Get());d.list->Dispatch((ow+7)/8,(oh+7)/8,1);transition(sharedOutput.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_COMMON);d.submit();
         historyValid=temporal;previousVertexBuffer=vertexBuffer;std::copy(std::begin(frame),std::end(frame),previousFrame.begin());poseChanged=false;shadowIndex=1-shadowIndex;
+        aaHistoryValid=aaActive;previousJitter[0]=jitter[0];previousJitter[1]=jitter[1];lastRender=began;
         if(temporal)stableFrames=std::min(stableFrames+1,32u);
-        double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();std::ostringstream s;s<<"{\"type\":\"frame\",\"id\":"<<id<<",\"handle\":\""<<uint64_t(remoteHandle)<<"\",\"width\":"<<width<<",\"height\":"<<height<<",\"renderMs\":"<<ms<<",\"shadowAccumulating\":"<<(temporal&&frame[46]>0&&stableFrames<32?"true":"false")<<'}';return s.str();
+        if(aaActive)aaStableFrames=std::min(aaStableFrames+1,32u);
+        const char* aaName=dlss.mode==1?"DLAA":dlss.mode==2?"DLSS Quality":dlss.mode==3?"DLSS Balanced":"MSAA 4x";
+        double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();std::ostringstream s;s<<"{\"type\":\"frame\",\"id\":"<<id<<",\"handle\":\""<<uint64_t(remoteHandle)<<"\",\"width\":"<<ow<<",\"height\":"<<oh<<",\"renderWidth\":"<<width<<",\"renderHeight\":"<<height<<",\"antialiasing\":\""<<aaName<<"\",\"aaReset\":"<<(aaReset?"true":"false")<<",\"renderMs\":"<<ms<<",\"aaAccumulating\":"<<(aaActive&&aaStableFrames<32?"true":"false")<<",\"shadowAccumulating\":"<<(temporal&&frame[46]>0&&stableFrames<32?"true":"false")<<'}';return s.str();
     }
 };

@@ -10,6 +10,12 @@
 
 [下载](https://github.com/mazelines/MMD-Canvas/releases) · [CI 结果](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [发布指南（韩语）](releases.md)
 
+## v0.5.5：DLAA 与 DLSS
+
+默认抗锯齿改为 NVIDIA DLAA，并可选择 DLSS Quality、DLSS Balanced 或 MSAA 4×。Lambert 和 Toon 均使用深度、运动向量，在 EV100、GT7 之前重建 HDR 颜色。DLAA/SR 支持 RTX 20 系列及更新型号，应用会查询实际 GPU 与驱动支持情况。不支持的 GPU 使用 DX12 MSAA 4×。
+
+RTX 4090 验证覆盖背景与曝光保持、相机与姿态移动、CORTAO/DXR 合成及 1,200 帧稳定性。极细几何和透明边缘仍可能闪烁，Balanced 模式更明显。安装包包含 NVIDIA 发布版 DLL 及单独的 SDK 许可证。[硬件要求与限制（韩语）](dlss.md) · [0.5.5 发布说明](release-notes/v0.5.5.md)。
+
 ## v0.5.4：时域累积 DXR 阴影
 
 Lambert、Toon 阴影使用 1、2、4 条光线计算，通过相机、蒙皮及变形的运动向量、时域累积，以及深度和几何法线引导的空间滤波重建。默认使用 4 条光线，另提供 128 条光线的参考模式。静止画面最多累积 32 帧，随后停止请求重绘。阴影在 EV100、GT7 之前作用于材质的直接光。[结构与限制](native-dx12.md#모션-벡터와-시간-누적-그림자)。

@@ -41,6 +41,7 @@ extraFiles:
     to: native/dx12
     filter:
       - '*.exe'
+      - '*.dll'
       - '*.cso'
       - '*.bin'
 win:

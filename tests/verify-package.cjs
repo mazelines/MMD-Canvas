@@ -8,7 +8,7 @@ function verifyPackage(archive, projectDir = path.resolve(__dirname, '..')) {
   const required = ['package.json', 'electron/main.js', 'electron/preload.cjs', 'electron/gpu-presenter.cjs',
     'renderer/index.html', 'renderer/app.js', 'renderer/viewer.js',
     'renderer/cortao.js', 'electron/dx12.js', 'renderer/dx12.js', 'renderer/native-textures.js',
-    'node_modules/three/build/three.core.js', 'src/core/ambient-occlusion.js', 'licenses/CORTAO-MIT.txt'];
+    'node_modules/three/build/three.core.js', 'src/core/ambient-occlusion.js', 'licenses/CORTAO-MIT.txt', 'licenses/NVIDIA-DLSS.txt'];
   // Check the complete runtime trees, including lazy loaders, their transitive
   // helpers and WASM assets. Checking only startup imports misses format failures.
   for (const directory of ['node_modules/three/examples/jsm']) {
@@ -38,12 +38,15 @@ module.exports = async ({ appOutDir, packager }) => {
   const resources = packager.getResourcesDir(appOutDir);
   verifyPackage(path.join(resources, 'app.asar'), packager.projectDir);
   verifyExample(path.join(packager.projectDir, 'Example'), path.join(resources, '..', 'Example'));
-  for (const file of ['mmd-dx12.exe', 'vertexMain.cso', 'outlineVertex.cso', 'outlineMain.cso', 'normalMain.cso', 'colorMain.cso', 'packMain.cso', 'mipMain.cso', 'cortaoMain.cso', 'outputMain.cso', 'shadowTraceMain.cso', 'shadowTemporalMain.cso', 'shadowSpatialMain.cso', 'shadowSpatialFinalMain.cso', '32x32x24x32_R32_UINT.bin']) {
+  for (const file of ['mmd-dx12.exe', 'nvngx_dlss.dll', 'aaColorMain.cso', 'aaOutlineMain.cso', 'aaPrepareMain.cso', 'vertexMain.cso', 'outlineVertex.cso', 'outlineMain.cso', 'normalMain.cso', 'colorMain.cso', 'packMain.cso', 'mipMain.cso', 'cortaoMain.cso', 'outputMain.cso', 'shadowTraceMain.cso', 'shadowTemporalMain.cso', 'shadowSpatialMain.cso', 'shadowSpatialFinalMain.cso', '32x32x24x32_R32_UINT.bin']) {
     const packaged=path.join(resources,'..','native','dx12',file);
     assert.ok(fs.existsSync(packaged),`Packaged DX12 runtime missing: ${file}`);
     assert.ok(fs.readFileSync(packaged).equals(fs.readFileSync(path.join(packager.projectDir,'out','dx12',file))),`Packaged DX12 runtime differs: ${file}`);
   }
-  console.log('Packaged DX12 executable, shader bytecode and CORTAO LUT verified.');
+  const runtime=fs.readFileSync(path.join(resources,'..','native','dx12','nvngx_dlss.dll'));
+  const manifest=JSON.parse(fs.readFileSync(path.join(packager.projectDir,'scripts','dlss-sdk.json'),'utf8'));
+  assert.equal(require('node:crypto').createHash('sha256').update(runtime).digest('hex'),manifest.find(file=>file.path.endsWith('/nvngx_dlss.dll')).sha256.toLowerCase(),'Packaged DLSS runtime must match the pinned SDK');
+  console.log('Packaged DX12 executable, shader bytecode, NVIDIA DLSS runtime and CORTAO LUT verified.');
 };
 module.exports.verifyPackage = verifyPackage;
 function verifyExample(source, destination) {
