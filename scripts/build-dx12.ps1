@@ -13,7 +13,7 @@ $sdkBin = Join-Path $sdkRoot "bin/$sdkVersion/x64"
 $env:PATH = "$vcBin;$sdkBin;$env:PATH"
 $env:INCLUDE = "$vcRoot/include;$sdkRoot/Include/$sdkVersion/ucrt;$sdkRoot/Include/$sdkVersion/shared;$sdkRoot/Include/$sdkVersion/um;$sdkRoot/Include/$sdkVersion/winrt"
 $env:LIB = "$vcRoot/lib/x64;$sdkRoot/Lib/$sdkVersion/ucrt/x64;$sdkRoot/Lib/$sdkVersion/um/x64"
-foreach ($entry in @('vertexMain:vs', 'outlineVertex:vs', 'outlineMain:ps', 'normalMain:ps', 'colorMain:ps', 'packMain:cs', 'mipMain:cs', 'cortaoMain:cs', 'outputMain:cs')) {
+foreach ($entry in @('vertexMain:vs', 'outlineVertex:vs', 'outlineMain:ps', 'normalMain:ps', 'colorMain:ps', 'packMain:cs', 'mipMain:cs', 'cortaoMain:cs', 'outputMain:cs', 'shadowTraceMain:cs', 'shadowTemporalMain:cs', 'shadowSpatialMain:cs', 'shadowSpatialFinalMain:cs')) {
   $parts = $entry.Split(':')
   & (Join-Path $sdkBin 'dxc.exe') -E $parts[0] -T "$($parts[1])_6_6" -I (Join-Path $repoRoot 'native/dx12') -I (Join-Path $repoRoot 'renderer/vendor/cortao') -Fo (Join-Path $nativeOut "$($parts[0]).cso") (Join-Path $repoRoot 'native/dx12/viewport.hlsl')
   if ($LASTEXITCODE -ne 0) { throw "Shader compilation failed: $entry" }

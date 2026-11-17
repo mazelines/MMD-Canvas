@@ -95,7 +95,7 @@ export function nativeModel(object, poseOnly = false) {
 
 export class Dx12Viewport {
   constructor(viewer, status) {
-    this.viewer = viewer; this.status = status; this.enabled = false; this.busy = false; this.dirty = false; this.loadedKey = ''; this.id = 0; this.shadowSamples = 64;
+    this.viewer = viewer; this.status = status; this.enabled = false; this.busy = false; this.dirty = false; this.loadedKey = ''; this.id = 0; this.shadowSamples = 4;
     this.canvas = viewer.canvas; this.empty = new THREE.Group();
     // Canvas2D loses its pixels when Chromium's GPU process restarts. A static
     // scene otherwise has no camera/animation change to request a fresh frame.
@@ -210,6 +210,9 @@ export class Dx12Viewport {
         else if(poseKey!==this.loadedPoseKey) { await window.api.dx12Pose(nativeModel(this.object,true));this.loadedPoseKey=poseKey; }
         const result=await window.api.dx12Render(this.frame());
         this.lastFrame=result;this.status.textContent=`DX12 Ultimate · DXR · ${result.renderMs.toFixed(1)} ms`;
+        // Finish temporal convergence even when the camera/model becomes still.
+        // Presentation acknowledgement already paces frames and bounds GPU leases.
+        if(result.shadowAccumulating)this.dirty=true;
       }
     } catch(e) { this.fail(e);
     } finally {this.busy=false;}

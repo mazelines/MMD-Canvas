@@ -21,8 +21,14 @@ struct NativeRenderer {
     ComPtr<ID3D12RootSignature> root;
     ComPtr<ID3D12DescriptorHeap> descriptors, rtvs, dsvs;
     ComPtr<ID3D12PipelineState> normalPso, colorPso, transparentPso, outlinePso, wirePso, packPso, mipPso, aoPso, outputPso;
+    ComPtr<ID3D12PipelineState> shadowTracePso, shadowTemporalPso, shadowSpatialPso, shadowFinalPso;
     ComPtr<ID3D12Resource> vertexBuffer, triangleBuffer, materialBuffer, indexBuffer, blas, tlas, scratch, instances, constants;
     ComPtr<ID3D12Resource> normal, depth, hdr, hdrMs, depthMs, packedBuffer, aoTexture, sharedOutput, lut;
+    ComPtr<ID3D12Resource> previousVertexBuffer, motion, shadowRawTexture, shadowGuideTexture;
+    std::array<ComPtr<ID3D12Resource>,2> surfaces, shadowHistories, shadowFilters;
+    std::array<float,72> previousFrame{};
+    uint32_t shadowIndex=0, samplingFrame=0, stableFrames=0;
+    bool historyValid=false, poseChanged=false;
     std::vector<ComPtr<ID3D12Resource>> images, uploads;
     std::vector<NativeTriangle> triangles;
     std::vector<NativeMaterial> materials;
@@ -36,15 +42,15 @@ struct NativeRenderer {
     explicit NativeRenderer(Device& device, const std::filesystem::path& dir, DWORD parentPid) : d(device), directory(dir) {
         parent = OpenProcess(PROCESS_DUP_HANDLE, FALSE, parentPid);
         if (!parent) throw std::runtime_error("Cannot share textures with the host process");
-        D3D12_DESCRIPTOR_HEAP_DESC h{}; h.NumDescriptors = 160; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV; h.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        D3D12_DESCRIPTOR_HEAP_DESC h{}; h.NumDescriptors = 176; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV; h.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
         check(d.device->CreateDescriptorHeap(&h, IID_PPV_ARGS(&descriptors)), "Create descriptors");
         descriptorSize = d.device->GetDescriptorHandleIncrementSize(h.Type);
-        h = {}; h.NumDescriptors = 2; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+        h = {}; h.NumDescriptors = 5; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
         check(d.device->CreateDescriptorHeap(&h, IID_PPV_ARGS(&rtvs)), "Create render target views"); rtvSize = d.device->GetDescriptorHandleIncrementSize(h.Type);
         h.NumDescriptors = 2; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
         check(d.device->CreateDescriptorHeap(&h, IID_PPV_ARGS(&dsvs)), "Create depth view");
         D3D12_DESCRIPTOR_RANGE ranges[2]{};
-        ranges[0] = {D3D12_DESCRIPTOR_RANGE_TYPE_SRV,137,0,0,0}; ranges[1] = {D3D12_DESCRIPTOR_RANGE_TYPE_UAV,3,0,0,0};
+        ranges[0] = {D3D12_DESCRIPTOR_RANGE_TYPE_SRV,147,0,0,0}; ranges[1] = {D3D12_DESCRIPTOR_RANGE_TYPE_UAV,10,0,0,0};
         D3D12_ROOT_PARAMETER params[4]{};
         params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV; params[0].Descriptor.ShaderRegister = 0;
         params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS; params[1].Constants = {1,0,4};
@@ -59,9 +65,10 @@ struct NativeRenderer {
         outlinePso = graphics("outlineMain", true, false, "outlineVertex");
         wirePso = graphics("colorMain", true, true, "vertexMain", true);
         packPso = compute("packMain"); mipPso = compute("mipMain"); aoPso = compute("cortaoMain"); outputPso = compute("outputMain");
-        constants = buffer(512,D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
+        shadowTracePso=compute("shadowTraceMain");shadowTemporalPso=compute("shadowTemporalMain");shadowSpatialPso=compute("shadowSpatialMain");shadowFinalPso=compute("shadowSpatialFinalMain");
+        constants = buffer(768,D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
         // Populate unused descriptors, including texture slots, with safe null resources.
-        for(uint32_t i=0;i<137;i++) { D3D12_SHADER_RESOURCE_VIEW_DESC v{}; v.Format=DXGI_FORMAT_R8G8B8A8_UNORM; v.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D; v.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; v.Texture2D.MipLevels=1; d.device->CreateShaderResourceView(nullptr,&v,cpu(i)); }
+        for(uint32_t i=0;i<147;i++) { D3D12_SHADER_RESOURCE_VIEW_DESC v{}; v.Format=DXGI_FORMAT_R8G8B8A8_UNORM; v.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D; v.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; v.Texture2D.MipLevels=1; d.device->CreateShaderResourceView(nullptr,&v,cpu(i)); }
         std::ifstream in(directory / "32x32x24x32_R32_UINT.bin",std::ios::binary);
         std::vector<uint8_t> table((std::istreambuf_iterator<char>(in)),{}); if(table.size()!=98304) throw std::runtime_error("CORTAO lookup table is missing");
         d.begin(); lut = texture(32,32,DXGI_FORMAT_R32_UINT,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST,24);
@@ -89,7 +96,7 @@ struct NativeRenderer {
             BOOL ok=DuplicateHandle(GetCurrentProcess(),local,parent,&frame->handle,0,FALSE,DUPLICATE_SAME_ACCESS);CloseHandle(local);if(!ok)throw std::runtime_error("Export texture handle failed");
             frame->w=width;frame->h=height;
         }
-        frame->id=id;frame->busy=true;sharedOutput=frame->texture;remoteHandle=frame->handle;textureView(sharedOutput.Get(),146,true);
+        frame->id=id;frame->busy=true;sharedOutput=frame->texture;remoteHandle=frame->handle;textureView(sharedOutput.Get(),162,true);
     }
     D3D12_CPU_DESCRIPTOR_HANDLE cpu(uint32_t i) { auto h=descriptors->GetCPUDescriptorHandleForHeapStart(); h.ptr+=size_t(i)*descriptorSize; return h; }
     D3D12_GPU_DESCRIPTOR_HANDLE gpu(uint32_t i) { auto h=descriptors->GetGPUDescriptorHandleForHeapStart(); h.ptr+=uint64_t(i)*descriptorSize; return h; }
@@ -135,6 +142,9 @@ struct NativeRenderer {
         auto& b=p.BlendState.RenderTarget[0]; b.BlendEnable=blend; b.SrcBlend=D3D12_BLEND_SRC_ALPHA; b.DestBlend=D3D12_BLEND_INV_SRC_ALPHA; b.BlendOp=D3D12_BLEND_OP_ADD; b.SrcBlendAlpha=D3D12_BLEND_ONE; b.DestBlendAlpha=D3D12_BLEND_INV_SRC_ALPHA; b.BlendOpAlpha=D3D12_BLEND_OP_ADD; b.RenderTargetWriteMask=D3D12_COLOR_WRITE_ENABLE_ALL;
         p.DepthStencilState.DepthEnable=TRUE; p.DepthStencilState.DepthWriteMask=depthWrite?D3D12_DEPTH_WRITE_MASK_ALL:D3D12_DEPTH_WRITE_MASK_ZERO; p.DepthStencilState.DepthFunc=D3D12_COMPARISON_FUNC_LESS_EQUAL;
         p.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE; p.NumRenderTargets=1; p.RTVFormats[0]=DXGI_FORMAT_R16G16B16A16_FLOAT; p.DSVFormat=DXGI_FORMAT_D32_FLOAT; p.SampleDesc.Count=blend?4:1; p.SampleMask=UINT_MAX;
+        if(std::strcmp(pixel,"normalMain")==0) {
+            p.NumRenderTargets=3;p.RTVFormats[1]=p.RTVFormats[2]=DXGI_FORMAT_R32G32B32A32_FLOAT;
+        }
         ComPtr<ID3D12PipelineState> result; check(d.device->CreateGraphicsPipelineState(&p,IID_PPV_ARGS(&result)),pixel); return result;
     }
     void loadModel(const std::vector<uint8_t>& packet) {
@@ -178,10 +188,11 @@ struct NativeRenderer {
             }
             transition(tex.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_GENERIC_READ);textureView(tex.Get(),8+i);images.push_back(tex); }
         buildAcceleration(); d.submit(); uploads.clear(); hasModel=true;
+        previousVertexBuffer=vertexBuffer;historyValid=false;stableFrames=0;poseChanged=false;
     }
     void updatePose(const std::vector<uint8_t>& packet) {
         if(!hasModel || packet.size()!=size_t(vertexCount)*sizeof(NativeVertex))throw std::runtime_error("Invalid pose vertex count");
-        d.begin();vertexBuffer=uploadBuffer(packet.data(),packet.size());structured(vertexBuffer.Get(),0,vertexCount,32);buildAcceleration();d.submit();uploads.clear();
+        d.begin();vertexBuffer=uploadBuffer(packet.data(),packet.size());structured(vertexBuffer.Get(),0,vertexCount,32);buildAcceleration();d.submit();uploads.clear();poseChanged=true;
     }
     void buildAcceleration() {
         D3D12_RAYTRACING_GEOMETRY_DESC geom{}; geom.Type=D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
@@ -207,21 +218,40 @@ struct NativeRenderer {
         depthMs=texture(w,h,DXGI_FORMAT_D32_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,D3D12_RESOURCE_STATE_DEPTH_WRITE,1,false,1,4);
         depth=texture(w,h,DXGI_FORMAT_D32_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,D3D12_RESOURCE_STATE_DEPTH_WRITE);
         aoTexture=texture(w,h,DXGI_FORMAT_R32_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_GENERIC_READ);
+        const auto rw=D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+        for(uint32_t i=0;i<2;i++) {
+            surfaces[i]=texture(w,h,DXGI_FORMAT_R32G32B32A32_FLOAT,rw|D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_GENERIC_READ);
+            shadowHistories[i]=texture(w,h,DXGI_FORMAT_R16G16B16A16_FLOAT,rw,D3D12_RESOURCE_STATE_GENERIC_READ);
+            shadowFilters[i]=texture(w,h,DXGI_FORMAT_R16G16B16A16_FLOAT,rw,D3D12_RESOURCE_STATE_GENERIC_READ);
+            d.device->CreateRenderTargetView(surfaces[i].Get(),nullptr,rtv(2+i));
+        }
+        motion=texture(w,h,DXGI_FORMAT_R32G32B32A32_FLOAT,rw|D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_GENERIC_READ);
+        shadowRawTexture=texture(w,h,DXGI_FORMAT_R16G16B16A16_FLOAT,rw,D3D12_RESOURCE_STATE_GENERIC_READ);
+        shadowGuideTexture=texture(w,h,DXGI_FORMAT_R16G16B16A16_FLOAT,rw,D3D12_RESOURCE_STATE_GENERIC_READ);
+        d.device->CreateRenderTargetView(motion.Get(),nullptr,rtv(4));
+        textureView(motion.Get(),139);textureView(shadowRawTexture.Get(),140);textureView(shadowFilters[1].Get(),144);textureView(shadowGuideTexture.Get(),145);
+        textureView(motion.Get(),164,true);textureView(shadowRawTexture.Get(),165,true);textureView(shadowGuideTexture.Get(),168,true);
+        textureView(shadowFilters[0].Get(),146);textureView(shadowFilters[0].Get(),166,true);textureView(shadowFilters[1].Get(),169,true);
+        historyValid=false;stableFrames=0;
         uint32_t total=0; for(uint32_t i=0;i<8;i++) { uint32_t mw=std::max(1u,w>>i),mh=std::max(1u,h>>i); mipInfo[i*4]=mw;mipInfo[i*4+1]=mh;mipInfo[i*4+2]=total;total+=mw*mh; }
         packedBuffer=buffer(size_t(total)*4,D3D12_HEAP_TYPE_DEFAULT,D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-        structured(packedBuffer.Get(),5,total,4);structured(packedBuffer.Get(),144,total,4,true);
-        textureView(normal.Get(),4);textureView(aoTexture.Get(),6);textureView(hdr.Get(),136);textureView(aoTexture.Get(),145,true);
+        structured(packedBuffer.Get(),5,total,4);structured(packedBuffer.Get(),160,total,4,true);
+        textureView(normal.Get(),4);textureView(aoTexture.Get(),6);textureView(hdr.Get(),136);textureView(aoTexture.Get(),161,true);
         d.device->CreateRenderTargetView(normal.Get(),nullptr,rtv(0));d.device->CreateRenderTargetView(hdrMs.Get(),nullptr,rtv(1));d.device->CreateDepthStencilView(depth.Get(),nullptr,dsvs->GetCPUDescriptorHandleForHeapStart());
         auto z=dsvs->GetCPUDescriptorHandleForHeapStart();z.ptr+=d.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);d.device->CreateDepthStencilView(depthMs.Get(),nullptr,z);
     }
     void bindings(bool graphicsPass) {
         ID3D12DescriptorHeap* heaps[]{descriptors.Get()};d.list->SetDescriptorHeaps(1,heaps);
-        if(graphicsPass) { d.list->SetGraphicsRootSignature(root.Get());d.list->SetGraphicsRootConstantBufferView(0,constants->GetGPUVirtualAddress());d.list->SetGraphicsRootDescriptorTable(2,gpu(0));d.list->SetGraphicsRootDescriptorTable(3,gpu(144)); }
-        else { d.list->SetComputeRootSignature(root.Get());d.list->SetComputeRootConstantBufferView(0,constants->GetGPUVirtualAddress());d.list->SetComputeRootDescriptorTable(2,gpu(0));d.list->SetComputeRootDescriptorTable(3,gpu(144)); }
+        if(graphicsPass) { d.list->SetGraphicsRootSignature(root.Get());d.list->SetGraphicsRootConstantBufferView(0,constants->GetGPUVirtualAddress());d.list->SetGraphicsRootDescriptorTable(2,gpu(0));d.list->SetGraphicsRootDescriptorTable(3,gpu(160)); }
+        else { d.list->SetComputeRootSignature(root.Get());d.list->SetComputeRootConstantBufferView(0,constants->GetGPUVirtualAddress());d.list->SetComputeRootDescriptorTable(2,gpu(0));d.list->SetComputeRootDescriptorTable(3,gpu(160)); }
     }
     void draw(bool normals) {
         bindings(true); D3D12_VIEWPORT vp{0,0,float(width),float(height),0,1};D3D12_RECT rect{0,0,LONG(width),LONG(height)};d.list->RSSetViewports(1,&vp);d.list->RSSetScissorRects(1,&rect);
         auto target=rtv(normals?0:1),z=dsvs->GetCPUDescriptorHandleForHeapStart();if(!normals)z.ptr+=d.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);d.list->OMSetRenderTargets(1,&target,FALSE,&z);float clear[4]{};d.list->ClearRenderTargetView(target,clear,0,nullptr);d.list->ClearDepthStencilView(z,D3D12_CLEAR_FLAG_DEPTH,1,0,0,nullptr);
+        if(normals) {
+            D3D12_CPU_DESCRIPTOR_HANDLE targets[]{target,rtv(2+shadowIndex),rtv(4)};
+            d.list->OMSetRenderTargets(3,targets,FALSE,&z);d.list->ClearRenderTargetView(targets[1],clear,0,nullptr);d.list->ClearRenderTargetView(targets[2],clear,0,nullptr);
+        }
         D3D12_INDEX_BUFFER_VIEW ib{indexBuffer->GetGPUVirtualAddress(),UINT(triangles.size()*12),DXGI_FORMAT_R32_UINT};d.list->IASetIndexBuffer(&ib);d.list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         for(int pass=0;pass<(normals?1:2);pass++) for(size_t start=0;start<triangles.size();) {
             size_t end=start+1;uint32_t mat=triangles[start].material;while(end<triangles.size()&&triangles[end].material==mat)end++;
@@ -231,18 +261,51 @@ struct NativeRenderer {
         }
         if(!normals&&outlines){d.list->SetPipelineState(outlinePso.Get());for(size_t start=0;start<triangles.size();){size_t end=start+1;uint32_t mat=triangles[start].material;while(end<triangles.size()&&triangles[end].material==mat)end++;uint32_t values[4]{mat,0,0,0};d.list->SetGraphicsRoot32BitConstants(1,4,values,0);d.list->DrawIndexedInstanced(UINT((end-start)*3),1,UINT(start*3),0,0);start=end;}}
     }
+    void denoiseShadows() {
+        bindings(false);
+        for(auto* resource:{surfaces[shadowIndex].Get(),motion.Get(),shadowRawTexture.Get(),shadowGuideTexture.Get()})transition(resource,D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        d.list->SetPipelineState(shadowTracePso.Get());d.list->Dispatch((width+7)/8,(height+7)/8,1);
+        for(auto* resource:{surfaces[shadowIndex].Get(),motion.Get(),shadowRawTexture.Get(),shadowGuideTexture.Get()})transition(resource,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_GENERIC_READ);
+        transition(shadowHistories[shadowIndex].Get(),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        d.list->SetPipelineState(shadowTemporalPso.Get());d.list->Dispatch((width+7)/8,(height+7)/8,1);
+        transition(shadowHistories[shadowIndex].Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_GENERIC_READ);
+        for(uint32_t i=0;i<2;i++) {
+            transition(shadowFilters[i].Get(),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            d.list->SetPipelineState(i?shadowFinalPso.Get():shadowSpatialPso.Get());d.list->Dispatch((width+7)/8,(height+7)/8,1);
+            transition(shadowFilters[i].Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_GENERIC_READ);
+        }
+    }
     std::string render(const std::vector<uint8_t>& packet) {
         if(!hasModel)throw std::runtime_error("Load a model before rendering");Reader r{packet};uint32_t id=r.u32();float frame[72];memcpy(frame,r.take(sizeof(frame)),sizeof(frame));
         wireframe=frame[55]>0;outlines=frame[49]>0&&frame[63]>0&&!wireframe;
         for(float f:frame) if(!std::isfinite(f)) throw std::runtime_error("Invalid frame constants");resize(uint32_t(frame[44]),uint32_t(frame[45]));
         acquireOutput(id);
-        void* mapped=nullptr;check(constants->Map(0,nullptr,&mapped),"Map constants");memcpy(mapped,frame,sizeof(frame));memcpy((uint8_t*)mapped+sizeof(frame),mipInfo.data(),sizeof(mipInfo));constants->Unmap(0,nullptr);
-        auto began=std::chrono::steady_clock::now();d.begin();transition(normal.Get(),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_RENDER_TARGET);draw(true);transition(normal.Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_GENERIC_READ);
+        bool temporal=frame[50]>0&&frame[54]>=1&&frame[54]<=4&&frame[53]==0&&!wireframe;
+        bool cameraChanged=std::memcmp(frame,previousFrame.data(),32*sizeof(float))!=0;
+        bool invalidate=!historyValid;
+        for(int i:{32,33,34,46,50,54,60})if(std::abs(frame[i]-previousFrame[i])>0.000001f)invalidate=true;
+        for(int i=16;i<32;i++)if(std::abs(frame[i]-previousFrame[i])>0.0001f)invalidate=true;
+        // Large camera cuts do not borrow unrelated history. Normal orbit/pan uses reprojection.
+        for(int i=0;i<12;i++)if(std::abs(frame[i]-previousFrame[i])>0.5f)invalidate=true;
+        if(invalidate||cameraChanged||poseChanged||!temporal)stableFrames=0;
+        uint32_t info[4]{samplingFrame++,invalidate?0u:1u,poseChanged?4u:32u,temporal?1u:0u};
+        structured(previousVertexBuffer.Get(),137,vertexCount,32);
+        textureView(surfaces[shadowIndex].Get(),138);textureView(surfaces[1-shadowIndex].Get(),142);textureView(surfaces[shadowIndex].Get(),163,true);
+        textureView(shadowHistories[1-shadowIndex].Get(),141);textureView(shadowHistories[shadowIndex].Get(),143);textureView(shadowHistories[shadowIndex].Get(),167,true);
+        void* mapped=nullptr;check(constants->Map(0,nullptr,&mapped),"Map constants");memcpy(mapped,frame,sizeof(frame));memcpy((uint8_t*)mapped+sizeof(frame),mipInfo.data(),sizeof(mipInfo));
+        memcpy((uint8_t*)mapped+416,previousFrame.data(),128);memcpy((uint8_t*)mapped+544,info,sizeof(info));constants->Unmap(0,nullptr);
+        auto began=std::chrono::steady_clock::now();d.begin();
+        for(auto* resource:{normal.Get(),surfaces[shadowIndex].Get(),motion.Get()})transition(resource,D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_RENDER_TARGET);
+        draw(true);
+        for(auto* resource:{normal.Get(),surfaces[shadowIndex].Get(),motion.Get()})transition(resource,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_GENERIC_READ);
+        if(temporal)denoiseShadows();
         bindings(false);transition(packedBuffer.Get(),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);d.list->SetPipelineState(packPso.Get());d.list->Dispatch((width+7)/8,(height+7)/8,1);uavBarrier(packedBuffer.Get());
         for(uint32_t i=1;i<8;i++) {uint32_t values[4]{0,i,0,0};d.list->SetComputeRoot32BitConstants(1,4,values,0);d.list->SetPipelineState(mipPso.Get());d.list->Dispatch((mipInfo[i*4]+7)/8,(mipInfo[i*4+1]+7)/8,1);uavBarrier(packedBuffer.Get());}
         transition(packedBuffer.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_GENERIC_READ);transition(aoTexture.Get(),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);d.list->SetPipelineState(aoPso.Get());d.list->Dispatch((width+7)/8,(height+7)/8,1);transition(aoTexture.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_GENERIC_READ);
         transition(hdrMs.Get(),D3D12_RESOURCE_STATE_RESOLVE_SOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET);draw(false);transition(hdrMs.Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_RESOLVE_SOURCE);transition(hdr.Get(),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_RESOLVE_DEST);d.list->ResolveSubresource(hdr.Get(),0,hdrMs.Get(),0,DXGI_FORMAT_R16G16B16A16_FLOAT);transition(hdr.Get(),D3D12_RESOURCE_STATE_RESOLVE_DEST,D3D12_RESOURCE_STATE_GENERIC_READ);
         bindings(false);transition(sharedOutput.Get(),D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);d.list->SetPipelineState(outputPso.Get());d.list->Dispatch((width+7)/8,(height+7)/8,1);transition(sharedOutput.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_COMMON);d.submit();
-        double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();std::ostringstream s;s<<"{\"type\":\"frame\",\"id\":"<<id<<",\"handle\":\""<<uint64_t(remoteHandle)<<"\",\"width\":"<<width<<",\"height\":"<<height<<",\"renderMs\":"<<ms<<'}';return s.str();
+        historyValid=temporal;previousVertexBuffer=vertexBuffer;std::copy(std::begin(frame),std::end(frame),previousFrame.begin());poseChanged=false;shadowIndex=1-shadowIndex;
+        if(temporal)stableFrames=std::min(stableFrames+1,32u);
+        double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();std::ostringstream s;s<<"{\"type\":\"frame\",\"id\":"<<id<<",\"handle\":\""<<uint64_t(remoteHandle)<<"\",\"width\":"<<width<<",\"height\":"<<height<<",\"renderMs\":"<<ms<<",\"shadowAccumulating\":"<<(temporal&&frame[46]>0&&stableFrames<32?"true":"false")<<'}';return s.str();
     }
 };
