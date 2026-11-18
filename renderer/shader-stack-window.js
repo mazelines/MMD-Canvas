@@ -1,14 +1,42 @@
+import * as THREE from 'three';
 import { setLanguage, translateStatic } from '../src/i18n/index.js';
+import { Viewer } from './viewer.js';
+import { Dx12Viewport } from './dx12.js';
 import { ShaderStackPanel } from './shader-stack-panel.js';
 
-// Editor-only window: the stack state lives in the main process; applying shaders
-// re-renders the main viewport. This window just edits code/stack/properties.
+// Unreal-material-editor style: a material preview sphere in the center canvas
+// (its own DX12 host, routed by sender in main), stack/code/properties on the right.
 const api = window.api;
 const startup = await api.startup();
 setLanguage(startup.locale);
 translateStatic(document.body);
 
+const viewer = new Viewer(document.getElementById('shader-preview-host'));
+viewer.flags.grid = false;
+viewer.grid.visible = false;
+viewer.setLightGizmo(false);
+
+// Neutral material sphere for shader authoring.
+const sphere = new THREE.Mesh(
+  new THREE.SphereGeometry(1, 64, 48),
+  new THREE.MeshLambertMaterial({ color: 0x9aa0ad })
+);
+viewer.root.add(sphere);
+viewer.current = { object: sphere, kind: 'preview' };
+viewer.camera.position.set(0, 0.4, 3.4);
+viewer.controls.target.set(0, 0, 0);
+viewer.camera.lookAt(0, 0, 0);
+viewer.controls.update();
+
+viewer.dx12 = new Dx12Viewport(viewer, document.getElementById('shader-preview-status'));
+viewer.dx12.aaMode = 0; // MSAA preview: avoid creating a DLSS feature in the preview host
+viewer.dx12.sharpen = 0;
+document.getElementById('renderer-retry').addEventListener('click', () => viewer.dx12.start());
+window.__shaderStackRender = () => viewer.requestRender();
+api.onShaderStackApplied(() => viewer.requestRender());
+void viewer.dx12.start();
+
 const panel = new ShaderStackPanel();
+window.__shaderPanel = panel;
 await panel.load();
-// Refresh when the stack changes elsewhere (e.g. a workspace restore).
 api.onShaderStackUpdated(layers => panel.setStack(layers));

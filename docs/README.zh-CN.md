@@ -10,6 +10,10 @@
 
 [下载](https://github.com/mazelines/MMD-Canvas/releases) · [CI 结果](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [发布指南（韩语）](releases.md)
 
+## v0.6.0：Unreal 风格着色器编辑器与材质预览
+
+将着色器堆栈编辑器重新设计为 Unreal 材质编辑器风格的工作画布：中央渲染材质球预览（轨道相机），右侧堆栈层支持拖放排序。通过层边界的 + 弹窗在层间插入函数，用 Del 或右键菜单删除。预览由独立的第二个 DX12 主机渲染；应用的堆栈同时更新球体预览和主角色视口。[结构与语法](shader-stack.md) · [0.6.0 发布说明](release-notes/v0.6.0.md)。
+
 ## v0.5.9：着色器堆栈恢复加固
 
 修复打开带着色器堆栈的工作区时，DX12 渲染器尚未就绪或编译错误不再中断工作区恢复。堆栈状态保留在主进程并在渲染器启动时应用。解决 v0.5.8 首次启动工作区路径报告回归。[0.5.9 发布说明](release-notes/v0.5.9.md)。
