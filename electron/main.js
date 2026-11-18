@@ -8,6 +8,7 @@ import { convertPmxFile, OUTPUT_FORMATS } from '../src/core/convert.js';
 import { readWorkspace, writeWorkspace, networkPaths } from '../src/core/workspace.js';
 import { Dx12Host } from './dx12.js';
 import { compileShaderStack } from './shader-compiler.js';
+import { packParams } from '../src/core/shader-stack.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Three.js supplies scene/loader data only; browser 3D rendering is disabled.
@@ -100,6 +101,8 @@ function buildMenu() {
         check(t('광원 기즈모'), 'flag-light-gizmo'),
         item(t('광원 방향 초기화'), 'light-reset'),
         { type: 'separator' },
+        { id: 'shader-stack-editor', label: t('셰이더 스택 편집기…'), accelerator: 'CmdOrCtrl+Shift+K', registerAccelerator: false, click: () => openShaderWindow() },
+        { type: 'separator' },
         { label: t('새로 고침'), accelerator: 'F5', registerAccelerator: false, click: () => win?.webContents.reload() },
         { label: t('개발자 도구'), accelerator: 'F12', registerAccelerator: false, click: () => win?.webContents.toggleDevTools() },
       ],
@@ -154,6 +157,29 @@ function createWindow() {
   win.on('closed', () => { win = null; });
 }
 
+// ---------------- shader stack editor window ----------------
+// Main process owns the stack state; the editor window queries/updates it and the
+// main viewport shows the result. Compilation/hot-swap happen here.
+let shaderStack = [];
+let shaderWin = null;
+function openShaderWindow() {
+  if (shaderWin && !shaderWin.isDestroyed()) { shaderWin.focus(); return; }
+  shaderWin = new BrowserWindow({
+    width: 720, height: 820, minWidth: 480, minHeight: 400,
+    backgroundColor: '#16181d', title: t('셰이더 스택'), show: true,
+    webPreferences: { preload: path.join(ROOT, 'electron', 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: false },
+  });
+  shaderWin.loadURL('app://ui/renderer/shader-stack.html');
+  shaderWin.on('closed', () => { shaderWin = null; });
+}
+function notifyShaderApplied() {
+  if (!win || win.isDestroyed()) return;
+  win.webContents.send('shader-stack:applied', shaderStack);
+  // Direct render kick: reliable across the multi-window setup where the IPC
+  // event alone may not restart a converged flush.
+  win.webContents.executeJavaScript('window.__shaderStackRender && window.__shaderStackRender()').catch(() => {});
+}
+
 app.whenReady().then(() => {
   if (!hasInstanceLock) return;
   if (process.platform !== 'win32' || Number(os.release().split('.')[2]) < 22000) {
@@ -198,6 +224,38 @@ handle('dx12:shader', async layers => {
 });
 handle('dx12:params', data => dx12.setParams(data));
 handle('dx12:stop', () => dx12.stop());
+
+// Shader stack editor window: main owns the state, compiles, hot-swap, and
+// notifies the main viewport to re-render. Apply serializes against the render
+// channel via pause/resume; parameter uploads are fire-and-forget.
+handle('shader-stack:get', () => shaderStack);
+ipcMain.handle('shader-stack:apply', async (event, layers) => {
+  try {
+    const next = Array.isArray(layers) ? layers : [];
+    const active = next.filter(l => l.enabled !== false);
+    const values = Object.fromEntries(next.map(l => [l.id, l.params || {}]));
+    let result;
+    if (!active.length) result = await dx12.shader(null);
+    else {
+      const blobs = await compileShaderStack(next);
+      result = await dx12.shader(blobs.color, blobs.aa);
+      dx12.setParams(packParams(next, values).buffer);
+    }
+    shaderStack = next;
+    notifyShaderApplied();
+    // Refresh the editor only when the change came from elsewhere (e.g. workspace
+    // restore), not from the editor window's own apply.
+    const fromEditor = shaderWin && !shaderWin.isDestroyed() && event.sender === shaderWin.webContents;
+    if (!fromEditor && shaderWin && !shaderWin.isDestroyed()) shaderWin.webContents.send('shader-stack:updated', shaderStack);
+    return { ok: true, value: result };
+  } catch (e) { return { ok: false, error: e.message || String(e) }; }
+});
+handle('shader-stack:params', values => {
+  for (const l of shaderStack) if (values && values[l.id]) l.params = { ...(l.params || {}), ...values[l.id] };
+  dx12.setParams(packParams(shaderStack, values || {}).buffer);
+  notifyShaderApplied();
+  return { ok: true };
+});
 
 handle('app:startup', async () => {
   rendererReady = true;

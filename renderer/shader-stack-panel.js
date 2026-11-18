@@ -1,5 +1,5 @@
 import { t } from '../src/i18n/index.js';
-import { parseLayer, parseStack, packParams } from '../src/core/shader-stack.js';
+import { parseLayer } from '../src/core/shader-stack.js';
 
 const node = (tag, props = {}, ...children) => {
   const element = Object.assign(document.createElement(tag), props);
@@ -43,8 +43,7 @@ let nextId = 1;
 const makeLayer = (name, code) => ({ id: `layer-${nextId++}`, name, code, enabled: true, params: {} });
 
 export class ShaderStackPanel {
-  constructor(viewer) {
-    this.viewer = viewer;
+  constructor() {
     this.$ = id => document.getElementById(id);
     this.stack = [];
     this.selected = -1;
@@ -55,6 +54,8 @@ export class ShaderStackPanel {
     this.$('shader-apply').addEventListener('click', () => this.apply());
     this.render();
   }
+
+  async load() { this.setStack(await window.api.shaderStackGet()); }
 
   // ---- persistence hooks (workspace capture/restore) ----
   getStack() { return this.stack.map(l => ({ id: l.id, name: l.name, code: l.code, enabled: l.enabled, params: l.params })); }
@@ -180,37 +181,29 @@ export class ShaderStackPanel {
 
   paramValues() { return Object.fromEntries(this.stack.map(l => [l.id, l.params || {}])); }
 
-  // Property-only update: no recompile, just upload values and re-render.
+  // Property-only update: no recompile; main uploads values and re-renders the
+  // main viewport.
   async applyParams() {
     if (!this.stack.some(l => l.enabled)) return;
-    try { await window.api.dx12Params(packParams(this.stack, this.paramValues()).buffer); this.viewer.requestRender(); }
+    try { await window.api.shaderStackParams(this.paramValues()); }
     catch (e) { this.setError(e.message); }
   }
 
-  // Full apply: compile + hot-swap the stack, then upload parameters.
+  // Full apply: main compiles + hot-swaps the stack and re-renders the main
+  // viewport. The render-channel pause/resume is handled in the main process.
   async apply() {
     if (this.applying) return;
     this.applying = true;
-    const dx = this.viewer.dx12;
-    const wasEnabled = dx.enabled;
-    dx.enabled = false; dx.dirty = false;
-    for (let i = 0; i < 100 && dx.busy; i++) await new Promise(r => setTimeout(r, 20));
     this.$('shader-status').textContent = t('컴파일 중…');
     try {
       const active = this.stack.filter(l => l.enabled);
-      if (!active.length) await window.api.dx12Shader([]);
-      else {
-        await window.api.dx12Shader(this.stack.map(l => ({ id: l.id, name: l.name, code: l.code, enabled: l.enabled })));
-        await window.api.dx12Params(packParams(this.stack, this.paramValues()).buffer);
-      }
+      await window.api.shaderStackApply(this.stack.map(l => ({ id: l.id, name: l.name, code: l.code, enabled: l.enabled, params: l.params })));
       this.setError(null);
       this.$('shader-status').textContent = active.length ? t('적용됨') : t('기본 셰이딩');
     } catch (e) {
       this.setError(e.message);
       this.$('shader-status').textContent = t('컴파일 오류');
     }
-    dx.enabled = wasEnabled;
-    this.viewer.requestRender();
     this.applying = false;
   }
 }

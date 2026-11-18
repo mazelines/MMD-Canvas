@@ -318,6 +318,8 @@ export const messages = {
   "샤픈 강도": ["Sharpen strength", "锐化强度", "シャープ強度"],
   "DLAA·DLSS 복원 후 윤곽을 선명하게 합니다. 모든 AA 모드에서 동작하며 0%는 끄기입니다.": ["Sharpens edges after DLAA/DLSS reconstruction. Works in every AA mode; 0% turns it off.", "在 DLAA/DLSS 重建后锐化边缘。适用于所有抗锯齿模式；0% 表示关闭。", "DLAA・DLSS 復元後に輪郭を鮮明にします。すべての AA モードで動作し、0% はオフです。"],
   "셰이더 스택": ["Shader Stack", "着色器堆栈", "シェーダースタック"],
+  "셰이더 스택 편집기…": ["Shader Stack Editor…", "着色器堆栈编辑器…", "シェーダースタックエディター…"],
+  "캐릭터 표면 셰이딩 위에 void 함수를 순서대로 쌓아 결과를 만듭니다. 적용 결과는 메인 뷰포트에 반영됩니다.": ["Stack void functions in order on top of the character surface shading; the result applies to the main viewport.", "在角色表面着色之上按顺序叠加 void 函数；结果应用于主视口。", "キャラクター表面シェーディングの上に void 関数を順に積み重ねます。結果はメインビューポートに反映されます。"],
   "함수 스택": ["Function Stack", "函数堆栈", "関数スタック"],
   "함수 추가": ["Add Function", "添加函数", "関数を追加"],
   "기본값": ["Reset", "重置", "リセット"],

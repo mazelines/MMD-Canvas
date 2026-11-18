@@ -22,7 +22,6 @@ export function captureWorkspace(viewer, state, panel) {
       camera: { position: camera.position.toArray(), target: viewer.controls.target.toArray(), up: camera.up.toArray(),
         fov: camera.fov, zoom: camera.zoom, near: camera.near, far: camera.far,
         maxDistance: Number.isFinite(viewer.controls.maxDistance) ? viewer.controls.maxDistance : 1e15 },
-      shaderStack: viewer.shaderPanel ? viewer.shaderPanel.getStack() : [],
     },
     conversion: {
       mode: state.dialogMode, format: $('opt-format').value, output: $('opt-output').value.trim(),
@@ -30,7 +29,7 @@ export function captureWorkspace(viewer, state, panel) {
       scale: Number($('opt-scale').value), nameMode: $('opt-names').value,
       morphs: $('opt-morphs').checked, copyTextures: $('opt-copy').checked, asciiNames: $('opt-ascii').checked, recursive: $('opt-recursive').checked,
     },
-    inspector: { tab: $('tab-shader').getAttribute('aria-selected') === 'true' ? 'shader' : $('tab-materials').getAttribute('aria-selected') === 'true' ? 'materials' : 'overview',
+    inspector: { tab: $('tab-materials').getAttribute('aria-selected') === 'true' ? 'materials' : 'overview',
       selectedMaterial: panel.selected, filter: $('material-search').value, soloVisibility: panel.savedVisibility?.slice() || null },
   };
 }
@@ -88,8 +87,8 @@ export function restoreWorkspaceState(data, viewer, state, panel, applyRenderMod
   panel.selected = Math.min(data.inspector.selectedMaterial, Math.max(0, panel.entries.length - 1));
   $('material-search').value = data.inspector.filter;
   panel.renderList(); panel.renderDetail();
-  if (viewer.shaderPanel) { viewer.shaderPanel.setStack(v.shaderStack || []); viewer.shaderPanel.apply(); }
-  $(`tab-${data.inspector.tab}`).click();
+  // Older workspaces may reference the removed 'shader' tab; fall back to overview.
+  ($(`tab-${data.inspector.tab}`) || $('tab-overview')).click();
 
   const c = data.conversion;
   state.dialogMode = c.mode; state.conversionSource = c.source;

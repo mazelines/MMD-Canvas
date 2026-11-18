@@ -205,12 +205,15 @@ struct NativeRenderer {
         auto ac=graphicsFromBlobs("aaColorMain",vs,aa,true,true);
         auto act=graphicsFromBlobs("aaColorMain",vs,aa,true,false);
         colorPso=c;transparentPso=ct;wirePso=w;aaColorPso=ac;aaTransparentPso=act;userShaderActive=true;
+        // The surface shading changed: discard temporal history so DLAA converges
+        // to the new result instead of blending it away against stale frames.
+        aaHistoryValid=false;aaStableFrames=0;
     }
     void resetShader() {
         colorPso=graphics("colorMain",true,true);transparentPso=graphics("colorMain",true,false);
         wirePso=graphics("colorMain",true,true,"vertexMain",true);
         aaColorPso=graphics("aaColorMain",true,true);aaTransparentPso=graphics("aaColorMain",true,false);
-        userShaderActive=false;
+        userShaderActive=false;aaHistoryValid=false;aaStableFrames=0;
     }
     void setParams(const std::vector<uint8_t>& packet) {
         void* mapped=nullptr;check(userParams->Map(0,nullptr,&mapped),"Map user params");

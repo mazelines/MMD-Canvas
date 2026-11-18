@@ -254,6 +254,11 @@ aside { background: var(--panel); min-height: 0; display: flex; flex-direction: 
 .shader-prop-row input[type="number"], .shader-prop-row input[type="text"] { width: 100%; }
 .shader-prop-row input[type="color"] { width: 40px; height: 24px; padding: 0; border: 1px solid var(--line); background: #12141a; }
 .shader-prop-row output { color: var(--muted); font-size: 11px; min-width: 30px; text-align: right; font-variant-numeric: tabular-nums; }
+body.shader-window { overflow: auto; user-select: text; }
+.shader-window-main { display: block; height: auto; min-height: 0; padding: 12px; max-width: 760px; margin: 0 auto; }
+.shader-window-main .panel { margin-bottom: 12px; }
+.shader-window-main #shader-stack { max-height: 240px; }
+.shader-window-main #shader-editor-host .CodeMirror { height: 320px; }
 
 /* ---------- status bar ---------- */
 #statusbar { flex: none; padding: 4px 10px; background: var(--panel); border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

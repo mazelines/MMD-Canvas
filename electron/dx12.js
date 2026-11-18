@@ -15,7 +15,11 @@ export class Dx12Host {
   constructor(root, getWindow) {
     this.root = root; this.getWindow = getWindow; this.child = null; this.pending = null;
     this.frames = new Set(); this.slotWaiters = new Set(); this.frameId = 0;
+    // Serialize native-channel requests (renders and shader loads) so a shader
+    // hot-swap never collides with an in-flight frame, without pausing the flush.
+    this.chain = Promise.resolve();
   }
+  serial(fn) { const p = this.chain.then(() => fn()); this.chain = p.then(() => {}, () => {}); return p; }
   get executable() { return app.isPackaged ? path.join(path.dirname(app.getPath('exe')), 'native/dx12/mmd-dx12.exe') : path.join(this.root, 'out/dx12/mmd-dx12.exe'); }
   get available() { return process.platform === 'win32' && fs.existsSync(this.executable); }
   async start() {
@@ -106,11 +110,13 @@ export class Dx12Host {
       colorLen.writeUInt32LE(color.length, 0); aaLen.writeUInt32LE(aa.length, 0);
       bytes = Buffer.concat([colorLen, color, aaLen, aa]);
     }
-    const result = await this.request('shader', 6, bytes);
+    const result = await this.serial(() => this.request('shader', 6, bytes));
     if (!result.ok) throw new Error(result.error || 'Shader load failed');
     return result;
   }
-  async setParams(data) { if (!(data instanceof ArrayBuffer)) throw new Error('Invalid shader params'); return this.request('params', 7, data); }
+  // Fire-and-forget: parameter uploads queue between renders on the single-threaded
+  // native loop (fence-waited, so safe) and must not collide with the render channel.
+  setParams(data) { if (!(data instanceof ArrayBuffer)) throw new Error('Invalid shader params'); this.send(7, data); }
   async render(bytes) {
     if (!(bytes instanceof ArrayBuffer) || bytes.byteLength !== 308) throw new Error('Invalid native frame packet');
     // Backpressure: the native command loop must stay free to receive release
@@ -127,7 +133,7 @@ export class Dx12Host {
     // A renderer reload resets its JS counter, while old GPU references can still
     // be returning. Host-issued IDs keep release messages unique across reloads.
     new Uint32Array(bytes, 0, 1)[0] = ++this.frameId;
-    return this.request('frame', 2, bytes);
+    return this.serial(() => this.request('frame', 2, bytes));
   }
   async receive(value, owner) {
     if (process.env.MMDCONV_DX12_VALIDATION) console.log('Native DX12:', value);

@@ -10,6 +10,10 @@ PMX(MMD) 모델을 미리 보고 **FBX / USD로 변환**하는 데스크톱 앱�
 
 [배포 파일 다운로드](https://github.com/mazelines/MMD-Canvas/releases) · [CI 실행 결과](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [릴리스 가이드](docs/releases.md)
 
+## v0.5.8: 셰이더 스택 편집기 별도 창
+
+셰이더 스택 편집기를 인스펙터 탭에서 **별도의 편집 전용 창**으로 분리했습니다. **보기 메뉴 → 셰이더 스택 편집기…**(Ctrl+Shift+K)로 열며, 창을 닫아도 스택 상태는 유지되어 다시 열 때 복원됩니다. 창에는 미리보기가 없고 적용 결과는 메인 뷰포트에 반영됩니다. 스택 상태는 메인 프로세스가 관리하고 렌더 채널 직렬화로 셰이더 로드가 진행 중인 렌더와 충돌하지 않습니다. [구조와 문법](docs/shader-stack.md) · [0.5.8 변경 내용](docs/release-notes/v0.5.8.md).
+
 ## v0.5.7: 셰이더 스택 에디터
 
 인스펙터의 **셰이더 스택** 탭에서 사용자가 작성한 HLSL 함수를 스택으로 쌓아 PMX 캐릭터의 표면 셰이딩을 확장합니다. 노드 그래프가 아닌 코드 편집 기반이며, 내장 라이팅은 고정 베이스로 유지하고 그 위에 `void fn(inout ShadingContext ctx)` 레이어를 순서대로 추가합니다. `//@property` 주석으로 선언한 파라미터는 스택 내용에 따라 UI에 자동 생성되고, 값 변경은 재컴파일 없이 반영됩니다.

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' app:; img-src 'self' app: blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self' app: 'unsafe-inline'; connect-src 'self' app: blob: data:; worker-src 'self' blob:">
+  <title>셰이더 스택</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="vendor/codemirror/codemirror.min.css">
+  <link rel="stylesheet" href="vendor/codemirror/theme/material-darker.min.css">
+  <script src="vendor/codemirror/codemirror.min.js"></script>
+  <script src="vendor/codemirror/mode/clike/clike.min.js"></script>
+</head>
+<body class="shader-window">
+  <main class="shader-window-main">
+    <section class="panel">
+      <h2>함수 스택 <button id="shader-add" class="link">함수 추가</button><button id="shader-reset" class="link">기본값</button></h2>
+      <ul id="shader-stack" aria-label="셰이더 함수 스택"></ul>
+      <div class="material-note">캐릭터 표면 셰이딩 위에 void 함수를 순서대로 쌓아 결과를 만듭니다. 적용 결과는 메인 뷰포트에 반영됩니다.</div>
+    </section>
+    <section class="panel">
+      <h2>코드 <span id="shader-name" class="count"></span></h2>
+      <div id="shader-editor-host"></div>
+      <pre id="shader-error" class="shader-error" hidden></pre>
+      <div class="shader-actions"><button id="shader-apply" class="primary">적용</button><span id="shader-status" class="muted"></span></div>
+    </section>
+    <section class="panel">
+      <h2>프로퍼티</h2>
+      <div id="shader-properties"></div>
+    </section>
+  </main>
+  <script type="module" src="shader-stack-window.js"></script>
+</body>
+</html>
