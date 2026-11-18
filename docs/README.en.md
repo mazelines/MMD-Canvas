@@ -10,6 +10,10 @@ A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
 
+## v0.6.1: depth-based rim light (DepthRimLight)
+
+Add a DepthRimLight example function inspired by the depth-based rim light technique used in miHoYo-style subculture games. Instead of fresnel, it samples neighbor scene depth along the light direction to detect silhouettes (depth discontinuities) and apply a rim. Adds a screen-space depth sampling helper (sampleSceneDepth) plus viewportSize/lightDirScreen context fields to the shader stack. Tune width, depth threshold, fade, intensity, and color via properties. [Structure and syntax](shader-stack.md) · [0.6.1 release notes](release-notes/v0.6.1.md).
+
 ## v0.6.0: Unreal-style shader editor with material preview
 
 Redesign the shader stack editor as an Unreal-material-editor-style working canvas: a material sphere preview (orbit camera) renders in the center, and stack layers on the right reorder by drag-and-drop. Insert functions between layers via a + boundary popup, and delete with Del or a right-click menu. The preview uses a second independent DX12 host; an applied stack updates both the sphere preview and the main character viewport. [Structure and syntax](shader-stack.md) · [0.6.0 release notes](release-notes/v0.6.0.md).

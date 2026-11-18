@@ -247,6 +247,8 @@ void baseShading(Varying v, bool front, uint primitive, inout ShadingContext ctx
     ctx.albedo = albedo; ctx.emission = emission; ctx.alpha = alpha; ctx.materialColor = m.color.rgb;
     ctx.ndl = ndl; ctx.direct = direct; ctx.shade = shade; ctx.fill = fill; ctx.ao = min(materialAO, screenAO);
     ctx.sunDir = normalize(sun.xyz); ctx.sunLux = sun.w; ctx.skyColor = sky.rgb; ctx.groundColor = ground.rgb;
+    ctx.viewportSize = viewport.xy;
+    ctx.lightDirScreen = mul((float3x3)view, ctx.sunDir).xy * float2(0.5, -0.5);
     ctx.color = lit;
 }
 // User stack injection point. The build-time default is empty (no layers); the

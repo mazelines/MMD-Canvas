@@ -10,6 +10,10 @@
 
 [下载](https://github.com/mazelines/MMD-Canvas/releases) · [CI 结果](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [发布指南（韩语）](releases.md)
 
+## v0.6.1：基于深度的边缘光（DepthRimLight）
+
+新增参考 miHoYo 系二次元游戏深度边缘光技法的 DepthRimLight 示例函数。不用菲涅尔，而是沿光源方向采样屏幕空间相邻深度，检测轮廓（深度不连续）并应用边缘光。为此向着色器堆栈添加了屏幕空间深度采样助手（sampleSceneDepth）及 viewportSize/lightDirScreen 上下文字段。可通过属性调节宽度、深度阈值、过渡、强度、颜色。[结构与语法](shader-stack.md) · [0.6.1 发布说明](release-notes/v0.6.1.md)。
+
 ## v0.6.0：Unreal 风格着色器编辑器与材质预览
 
 将着色器堆栈编辑器重新设计为 Unreal 材质编辑器风格的工作画布：中央渲染材质球预览（轨道相机），右侧堆栈层支持拖放排序。通过层边界的 + 弹窗在层间插入函数，用 Del 或右键菜单删除。预览由独立的第二个 DX12 主机渲染；应用的堆栈同时更新球体预览和主角色视口。[结构与语法](shader-stack.md) · [0.6.0 发布说明](release-notes/v0.6.0.md)。
