@@ -9,24 +9,40 @@
   <link rel="stylesheet" href="vendor/codemirror/theme/material-darker.min.css">
   <script src="vendor/codemirror/codemirror.min.js"></script>
   <script src="vendor/codemirror/mode/clike/clike.min.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "../node_modules/three/build/three.core.js",
+        "three/addons/": "../node_modules/three/examples/jsm/"
+      }
+    }
+  </script>
 </head>
 <body class="shader-window">
-  <main class="shader-window-main">
-    <section class="panel">
-      <h2>함수 스택 <button id="shader-add" class="link">함수 추가</button><button id="shader-reset" class="link">기본값</button></h2>
-      <ul id="shader-stack" aria-label="셰이더 함수 스택"></ul>
-      <div class="material-note">캐릭터 표면 셰이딩 위에 void 함수를 순서대로 쌓아 결과를 만듭니다. 적용 결과는 메인 뷰포트에 반영됩니다.</div>
+  <main class="shader-editor-grid">
+    <section class="shader-center">
+      <div id="shader-preview-host" class="shader-preview-host">
+        <div id="renderer-error" role="alert" hidden><strong>DirectX 12 Ultimate</strong><p></p><button id="renderer-retry">다시 시도</button></div>
+        <output id="shader-preview-status" class="shader-preview-status"></output>
+      </div>
+      <div class="shader-code-panel">
+        <h2>코드 <span id="shader-name" class="count"></span></h2>
+        <div id="shader-editor-host"></div>
+        <pre id="shader-error" class="shader-error" hidden></pre>
+        <div class="shader-actions"><button id="shader-apply" class="primary">적용</button><span id="shader-status" class="muted"></span></div>
+      </div>
     </section>
-    <section class="panel">
-      <h2>코드 <span id="shader-name" class="count"></span></h2>
-      <div id="shader-editor-host"></div>
-      <pre id="shader-error" class="shader-error" hidden></pre>
-      <div class="shader-actions"><button id="shader-apply" class="primary">적용</button><span id="shader-status" class="muted"></span></div>
-    </section>
-    <section class="panel">
-      <h2>프로퍼티</h2>
-      <div id="shader-properties"></div>
-    </section>
+    <aside class="shader-right">
+      <section class="panel">
+        <h2>함수 스택 <button id="shader-add" class="link">함수 추가</button><button id="shader-reset" class="link">기본값</button></h2>
+        <ul id="shader-stack" aria-label="셰이더 함수 스택"></ul>
+        <div class="material-note">레이어를 드래그해 순서를 바꾸고, 경계의 + 로 함수를 삽입합니다. 선택 후 Del 또는 우클릭으로 삭제합니다.</div>
+      </section>
+      <section class="panel">
+        <h2>프로퍼티</h2>
+        <div id="shader-properties"></div>
+      </section>
+    </aside>
   </main>
   <script type="module" src="shader-stack-window.js"></script>
 </body>

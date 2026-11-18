@@ -41,6 +41,7 @@ void ToonRamp(inout ShadingContext ctx) {
 
 let nextId = 1;
 const makeLayer = (name, code) => ({ id: `layer-${nextId++}`, name, code, enabled: true, params: {} });
+const BLANK_TEMPLATE = { name: 'Custom', code: `void Custom(inout ShadingContext ctx) {\n    // ctx.color 를 변형하세요\n}` };
 
 export class ShaderStackPanel {
   constructor() {
@@ -49,9 +50,22 @@ export class ShaderStackPanel {
     this.selected = -1;
     this.editor = null;
     this.applying = false;
-    this.$('shader-add').addEventListener('click', () => this.addExample());
+    this.dragIndex = -1;
+    this.popup = null;
+    this.$('shader-add').addEventListener('click', () => this.insertLayer(this.stack.length, SHADER_EXAMPLES[this.stack.length % SHADER_EXAMPLES.length]));
     this.$('shader-reset').addEventListener('click', () => { this.stack = []; this.selected = -1; this.render(); this.apply(); });
     this.$('shader-apply').addEventListener('click', () => this.apply());
+    // Delete the selected layer with Del/Backspace unless typing in a field/editor.
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;
+      const el = document.activeElement;
+      const typing = el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.closest?.('.CodeMirror'));
+      if (typing || this.selected < 0 || this.popup) return;
+      ev.preventDefault();
+      this.removeLayer(this.selected);
+    });
+    document.addEventListener('pointerdown', (ev) => { if (this.popup && !this.popup.contains(ev.target)) this.closePopup(); }, true);
+    document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') this.closePopup(); });
     this.render();
   }
 
@@ -65,45 +79,126 @@ export class ShaderStackPanel {
     this.render();
   }
 
-  addExample() {
-    // Cycle through examples so repeated adds give variety.
-    const example = SHADER_EXAMPLES[this.stack.length % SHADER_EXAMPLES.length];
-    const layer = makeLayer(example.name, example.code);
-    this.stack.push(layer);
-    this.selected = this.stack.length - 1;
-    this.render();
-    this.apply();
-  }
-
   render() {
     this.renderStack();
     this.renderEditor();
     this.renderProperties();
   }
 
+  // Insert a layer at a boundary index, giving it a unique function name so the
+  // generated HLSL never redefines a function.
+  insertLayer(index, template) {
+    const existing = new Set(this.stack.map(l => l.name));
+    let name = template.name, n = 2;
+    while (existing.has(name)) name = `${template.name}_${n++}`;
+    const code = template.code.replace(/void\s+\w+\s*\(\s*inout\s+ShadingContext/, `void ${name}(inout ShadingContext`);
+    this.stack.splice(index, 0, makeLayer(name, code));
+    this.selected = index;
+    this.closePopup();
+    this.render();
+    this.apply();
+  }
+
+  removeLayer(index) {
+    if (index < 0 || index >= this.stack.length) return;
+    this.stack.splice(index, 1);
+    this.selected = Math.min(this.selected, this.stack.length - 1);
+    this.closePopup();
+    this.render();
+    this.apply();
+  }
+
+  moveLayer(from, to) {
+    if (from === to || from < 0 || from >= this.stack.length) return;
+    const [layer] = this.stack.splice(from, 1);
+    this.stack.splice(Math.max(0, Math.min(to, this.stack.length)), 0, layer);
+    this.selected = this.stack.indexOf(layer);
+    this.render();
+    this.apply();
+  }
+
+  // Floating function catalog anchored at a boundary "+" button.
+  openCatalog(index, anchor) {
+    this.closePopup();
+    const menu = node('div', { className: 'shader-popup', role: 'menu' });
+    menu.append(node('div', { className: 'shader-popup-title', textContent: t('함수 삽입') }));
+    for (const example of [...SHADER_EXAMPLES, BLANK_TEMPLATE]) {
+      const item = node('button', { className: 'shader-popup-item', textContent: example.name, role: 'menuitem' });
+      item.addEventListener('click', () => this.insertLayer(index, example));
+      menu.append(item);
+    }
+    this.showPopup(menu, anchor);
+  }
+
+  // Right-click context menu for a layer row.
+  openContextMenu(index, ev) {
+    this.closePopup();
+    this.selected = index;
+    this.renderStack();
+    const menu = node('div', { className: 'shader-popup shader-context', role: 'menu' });
+    const del = node('button', { className: 'shader-popup-item', textContent: t('삭제'), role: 'menuitem' });
+    del.addEventListener('click', () => this.removeLayer(index));
+    menu.append(del);
+    this.showPopup(menu, null, ev.clientX, ev.clientY);
+  }
+
+  showPopup(menu, anchor, x, y) {
+    document.body.append(menu);
+    this.popup = menu;
+    const r = anchor ? anchor.getBoundingClientRect() : null;
+    const left = r ? r.left : x;
+    const top = r ? r.bottom + 2 : y;
+    menu.style.left = Math.min(left, window.innerWidth - menu.offsetWidth - 8) + 'px';
+    menu.style.top = Math.min(top, window.innerHeight - menu.offsetHeight - 8) + 'px';
+  }
+
+  closePopup() { if (this.popup) { this.popup.remove(); this.popup = null; } }
+
   renderStack() {
     const list = this.$('shader-stack');
     list.replaceChildren();
+    const insertButton = (index) => {
+      const b = node('button', { className: 'shader-insert', textContent: '+', title: t('여기에 함수 삽입'), ariaLabel: t('여기에 함수 삽입') });
+      b.addEventListener('click', () => this.openCatalog(index, b));
+      return b;
+    };
     if (!this.stack.length) {
-      list.append(node('li', { className: 'material-empty', textContent: t('함수 추가를 눌러 셰이더 레이어를 쌓으세요.') }));
+      list.append(node('li', { className: 'material-empty', textContent: t('+ 를 눌러 셰이더 레이어를 쌓으세요.') }));
+      list.append(insertButton(0));
       return;
     }
     this.stack.forEach((layer, i) => {
-      const row = node('li', { className: i === this.selected ? 'active' : '' });
+      list.append(insertButton(i));
+      const row = node('li', { className: i === this.selected ? 'active' : '', draggable: true });
       row.dataset.index = i;
       const toggle = node('input', { type: 'checkbox', checked: layer.enabled, title: t('활성화') });
       toggle.addEventListener('change', () => { layer.enabled = toggle.checked; this.apply(); });
       const select = node('button', { className: 'shader-select', textContent: layer.name, ariaPressed: String(i === this.selected) });
       select.addEventListener('click', () => { this.selected = i; this.render(); });
-      const up = node('button', { className: 'link', textContent: '↑', title: t('위로'), disabled: i === 0 });
-      up.addEventListener('click', () => { [this.stack[i - 1], this.stack[i]] = [this.stack[i], this.stack[i - 1]]; this.selected = i - 1; this.render(); this.apply(); });
-      const down = node('button', { className: 'link', textContent: '↓', title: t('아래로'), disabled: i === this.stack.length - 1 });
-      down.addEventListener('click', () => { [this.stack[i + 1], this.stack[i]] = [this.stack[i], this.stack[i + 1]]; this.selected = i + 1; this.render(); this.apply(); });
-      const remove = node('button', { className: 'link', textContent: '✕', title: t('제거') });
-      remove.addEventListener('click', () => { this.stack.splice(i, 1); this.selected = Math.min(this.selected, this.stack.length - 1); this.render(); this.apply(); });
-      row.append(toggle, select, up, down, remove);
+      row.append(toggle, select);
+      row.addEventListener('click', () => { this.selected = i; this.render(); });
+      row.addEventListener('contextmenu', (ev) => { ev.preventDefault(); this.openContextMenu(i, ev); });
+      row.addEventListener('dragstart', (ev) => { this.dragIndex = i; ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', String(i)); row.classList.add('dragging'); });
+      row.addEventListener('dragend', () => { this.dragIndex = -1; list.querySelectorAll('.drop-above,.drop-below,.dragging').forEach(el => el.classList.remove('drop-above', 'drop-below', 'dragging')); });
+      row.addEventListener('dragover', (ev) => {
+        ev.preventDefault(); ev.dataTransfer.dropEffect = 'move';
+        const rect = row.getBoundingClientRect();
+        const after = ev.clientY > rect.top + rect.height / 2;
+        row.classList.toggle('drop-below', after);
+        row.classList.toggle('drop-above', !after);
+      });
+      row.addEventListener('dragleave', () => row.classList.remove('drop-above', 'drop-below'));
+      row.addEventListener('drop', (ev) => {
+        ev.preventDefault();
+        const rect = row.getBoundingClientRect();
+        const after = ev.clientY > rect.top + rect.height / 2;
+        let to = i + (after ? 1 : 0);
+        if (this.dragIndex < to) to -= 1;
+        this.moveLayer(this.dragIndex, to);
+      });
       list.append(row);
     });
+    list.append(insertButton(this.stack.length));
   }
 
   renderEditor() {
@@ -124,7 +219,7 @@ export class ShaderStackPanel {
         indentUnit: 4, tabSize: 4, indentWithTabs: false, lineWrapping: false,
         extraKeys: { 'Ctrl-S': () => this.apply(), 'Cmd-S': () => this.apply() },
       });
-      this.editor.on('change', () => { layer.code = this.editor.getValue(); });
+      this.editor.on('change', () => { const current = this.stack[this.selected]; if (current) current.code = this.editor.getValue(); });
     }
     if (this.editor.getValue() !== layer.code) this.editor.setValue(layer.code);
   }

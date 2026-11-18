@@ -10,6 +10,10 @@ A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
 
+## v0.6.0: Unreal-style shader editor with material preview
+
+Redesign the shader stack editor as an Unreal-material-editor-style working canvas: a material sphere preview (orbit camera) renders in the center, and stack layers on the right reorder by drag-and-drop. Insert functions between layers via a + boundary popup, and delete with Del or a right-click menu. The preview uses a second independent DX12 host; an applied stack updates both the sphere preview and the main character viewport. [Structure and syntax](shader-stack.md) · [0.6.0 release notes](release-notes/v0.6.0.md).
+
 ## v0.5.9: shader stack restore hardening
 
 Fix opening a workspace with a shader stack so a not-yet-ready DX12 renderer or a compile error no longer aborts the workspace restore. The stack state is kept in the main process and applied when the renderer starts. Resolves the v0.5.8 first-launch workspace-path reporting regression. [0.5.9 release notes](release-notes/v0.5.9.md).

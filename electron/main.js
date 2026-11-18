@@ -27,12 +27,16 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let win = null;
+let shaderWin = null;
 const dx12 = new Dx12Host(ROOT, () => win);
-app.on('before-quit', () => dx12.stop());
+// Independent second host renders the material preview in the shader editor window.
+const previewDx12 = new Dx12Host(ROOT, () => shaderWin);
+app.on('before-quit', () => { dx12.stop(); previewDx12.stop(); });
 app.on('child-process-gone', (_event, details) => {
   if (details.type === 'GPU') dx12.logPresentation('gpu-process-exit', { reason: details.reason, exitCode: details.exitCode });
 });
-ipcMain.on('dx12:presented', (event, id, error) => dx12.presented(event.sender, id, error));
+// Route presentation acks by sender: each host's presented() filters to its own window.
+ipcMain.on('dx12:presented', (event, id, error) => { dx12.presented(event.sender, id, error); previewDx12.presented(event.sender, id, error); });
 // Display language the user chose in the OS (the system locale is only the regional format on Windows).
 const systemLanguage = () => process.env.MMDCONV_LOCALE || app.getPreferredSystemLanguages?.()[0] || app.getSystemLocale();
 // One window per user: opening another file (e.g. double-clicking a .canvas) reuses the running app.
@@ -101,7 +105,7 @@ function buildMenu() {
         check(t('광원 기즈모'), 'flag-light-gizmo'),
         item(t('광원 방향 초기화'), 'light-reset'),
         { type: 'separator' },
-        { id: 'shader-stack-editor', label: t('셰이더 스택 편집기…'), accelerator: 'CmdOrCtrl+Shift+K', registerAccelerator: false, click: () => openShaderWindow() },
+        { id: 'shader-stack-editor', label: t('셰이더 스택 편집기…'), accelerator: 'CmdOrCtrl+Shift+K', click: () => openShaderWindow() },
         { type: 'separator' },
         { label: t('새로 고침'), accelerator: 'F5', registerAccelerator: false, click: () => win?.webContents.reload() },
         { label: t('개발자 도구'), accelerator: 'F12', registerAccelerator: false, click: () => win?.webContents.toggleDevTools() },
@@ -146,6 +150,7 @@ function createWindow() {
   });
   Menu.setApplicationMenu(buildMenu());
   win.loadURL('app://ui/renderer/index.html');
+  if (process.env.MMDCONV_SHADER_EDITOR) win.webContents.once('did-finish-load', () => openShaderWindow());
   win.webContents.on('before-input-event', (_e, input) => {
     if (input.type !== 'keyDown') return;
     if (input.key === 'F12') win.webContents.toggleDevTools();
@@ -161,23 +166,24 @@ function createWindow() {
 // Main process owns the stack state; the editor window queries/updates it and the
 // main viewport shows the result. Compilation/hot-swap happen here.
 let shaderStack = [];
-let shaderWin = null;
 function openShaderWindow() {
   if (shaderWin && !shaderWin.isDestroyed()) { shaderWin.focus(); return; }
   shaderWin = new BrowserWindow({
-    width: 720, height: 820, minWidth: 480, minHeight: 400,
+    width: 1200, height: 820, minWidth: 860, minHeight: 560,
     backgroundColor: '#16181d', title: t('셰이더 스택'), show: true,
     webPreferences: { preload: path.join(ROOT, 'electron', 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: false },
   });
   shaderWin.loadURL('app://ui/renderer/shader-stack.html');
-  shaderWin.on('closed', () => { shaderWin = null; });
+  shaderWin.on('closed', () => { previewDx12.stop(); shaderWin = null; });
 }
 function notifyShaderApplied() {
-  if (!win || win.isDestroyed()) return;
-  win.webContents.send('shader-stack:applied', shaderStack);
   // Direct render kick: reliable across the multi-window setup where the IPC
-  // event alone may not restart a converged flush.
-  win.webContents.executeJavaScript('window.__shaderStackRender && window.__shaderStackRender()').catch(() => {});
+  // event alone may not restart a converged flush. Kick both viewports.
+  for (const w of [win, shaderWin]) {
+    if (!w || w.isDestroyed()) continue;
+    w.webContents.send('shader-stack:applied', shaderStack);
+    w.webContents.executeJavaScript('window.__shaderStackRender && window.__shaderStackRender()').catch(() => {});
+  }
 }
 
 app.whenReady().then(() => {
@@ -213,22 +219,29 @@ const handle = (channel, fn) => ipcMain.handle(channel, async (_e, ...args) => {
   try { return { ok: true, value: await fn(...args) }; }
   catch (e) { return { ok: false, error: e.message || String(e) }; }
 });
-handle('dx12:start', async () => {
-  const caps = await dx12.start();
-  // Apply any stack restored before the renderer was ready.
+// Route DX12 calls to the preview host when they come from the editor window,
+// otherwise to the main host. The editor's Dx12Viewport uses the same api.dx12*.
+const hostFor = (e) => (shaderWin && !shaderWin.isDestroyed() && e.sender === shaderWin.webContents) ? previewDx12 : dx12;
+const handleHost = (channel, fn) => ipcMain.handle(channel, async (e, ...args) => {
+  try { return { ok: true, value: await fn(hostFor(e), ...args) }; }
+  catch (err) { return { ok: false, error: err.message || String(err) }; }
+});
+handleHost('dx12:start', async (host) => {
+  const caps = await host.start();
+  // Apply any stack restored before the renderer was ready (both hosts).
   try { await loadShaderStack(); notifyShaderApplied(); } catch { /* best-effort */ }
   return caps;
 });
-handle('dx12:model', data => dx12.model(data));
-handle('dx12:pose', data => dx12.pose(data));
-handle('dx12:render', data => dx12.render(data));
-handle('dx12:shader', async layers => {
-  if (!layers || !layers.length) return dx12.shader(null);
+handleHost('dx12:model', (host, data) => host.model(data));
+handleHost('dx12:pose', (host, data) => host.pose(data));
+handleHost('dx12:render', (host, data) => host.render(data));
+handleHost('dx12:shader', async (host, layers) => {
+  if (!layers || !layers.length) return host.shader(null);
   const blobs = await compileShaderStack(layers);
-  return dx12.shader(blobs.color, blobs.aa);
+  return host.shader(blobs.color, blobs.aa);
 });
-handle('dx12:params', data => dx12.setParams(data));
-handle('dx12:stop', () => dx12.stop());
+handleHost('dx12:params', (host, data) => host.setParams(data));
+handleHost('dx12:stop', (host) => host.stop());
 
 // Shader stack editor window: main owns the state, compiles, hot-swap, and
 // notifies the main viewport to re-render. The host mutex serializes shader loads
@@ -237,13 +250,19 @@ handle('shader-stack:get', () => shaderStack);
 // Best-effort compile + hot-swap of the current stack into the running renderer.
 // Skips silently if the renderer is not up yet (applied later on dx12:start).
 async function loadShaderStack() {
-  if (!dx12.child) return;
+  const hosts = [dx12, previewDx12].filter(h => h.child);
+  if (!hosts.length) return;
   const active = shaderStack.filter(l => l.enabled !== false);
-  if (!active.length) { await dx12.shader(null); return; }
   const values = Object.fromEntries(shaderStack.map(l => [l.id, l.params || {}]));
-  const blobs = await compileShaderStack(shaderStack);
-  await dx12.shader(blobs.color, blobs.aa);
-  dx12.setParams(packParams(shaderStack, values).buffer);
+  // Compile once, feed the same blobs to every running host (each serializes its
+  // own swap against its renders).
+  const blobs = active.length ? await compileShaderStack(shaderStack) : null;
+  const params = packParams(shaderStack, values).buffer;
+  for (const host of hosts) {
+    if (!blobs) { await host.shader(null); continue; }
+    await host.shader(blobs.color, blobs.aa);
+    host.setParams(params);
+  }
 }
 ipcMain.handle('shader-stack:apply', async (event, layers) => {
   const next = Array.isArray(layers) ? layers : [];
@@ -262,7 +281,8 @@ ipcMain.handle('shader-stack:apply', async (event, layers) => {
 });
 handle('shader-stack:params', values => {
   for (const l of shaderStack) if (values && values[l.id]) l.params = { ...(l.params || {}), ...values[l.id] };
-  dx12.setParams(packParams(shaderStack, values || {}).buffer);
+  const params = packParams(shaderStack, values || {}).buffer;
+  for (const host of [dx12, previewDx12]) if (host.child) host.setParams(params);
   notifyShaderApplied();
   return { ok: true };
 });
