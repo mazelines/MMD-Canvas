@@ -30,6 +30,17 @@ struct ShadingContext {
     float  sunLux;
     float3 skyColor;
     float3 groundColor;
+    // Screen-space (for depth-based effects)
+    float2 viewportSize;   // render width/height in pixels
+    float2 lightDirScreen; // sun direction projected to screen XY (y flipped)
     // Result (writable)
     float3 color;        // scene-linear lit, before /100
 };
+
+// Screen-space scene depth from the prepass (view-space depth; 0 = background).
+// Lets stack layers sample neighbor depth for depth-based rim/edge effects.
+// Included after the Frame cbuffer and normalDepth (t4) declarations in viewport.hlsl.
+float sampleSceneDepth(float2 pixel) {
+    int2 p = clamp(int2(pixel), int2(0, 0), int2(viewport.xy) - 1);
+    return normalDepth.Load(int3(p, 0)).w;
+}

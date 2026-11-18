@@ -13,6 +13,19 @@ void RimLight(inout ShadingContext ctx) {
     float rim = pow(1 - saturate(dot(ctx.normal, ctx.viewDir)), 3);
     ctx.color += tint * rim * strength;
 }`;
+const DEPTH_RIM=`//@property float width = 1.0 [0,3] "림 폭"
+//@property float bias = 0.1 [0,1] "깊이 임계값"
+//@property float fade = 0.3 [0.01,1] "전이 폭"
+//@property float intensity = 1.0 [0,2] "강도"
+//@property float3 rimColor = (1,1,1) "림 색상"
+void DepthRimLight(inout ShadingContext ctx) {
+    float2 offsetBase = ctx.lightDirScreen / max(ctx.depth, 0.001);
+    float2 offsetUV = offsetBase * (3.0 * width) * (width * width);
+    float neighborDepth = sampleSceneDepth(ctx.pixel + offsetUV * ctx.viewportSize);
+    float rel = abs(neighborDepth - ctx.depth) / max(ctx.depth, 0.001);
+    float mask = saturate((rel - bias) / max(fade, 1e-5));
+    ctx.color += rimColor * mask * intensity;
+}`;
 app.on('browser-window-created',(_event,win)=>win.webContents.once('did-finish-load',async()=>{
   try {
     await win.webContents.executeJavaScript(`(async()=>{
@@ -38,6 +51,12 @@ app.on('browser-window-created',(_event,win)=>win.webContents.once('did-finish-l
       await api.dx12Params(packParams([layer],{rim:{strength:1.0,tint:[0,1,0]}}).buffer);
       const modulated=await draw();
       const paramError=diff(rimmed,modulated);
+      // Depth-based rim light: samples neighbor scene depth along the light dir.
+      const depthLayer={id:'depth',name:'DepthRimLight',code:${JSON.stringify(DEPTH_RIM)},enabled:true};
+      const depthLoad=await api.dx12Shader([depthLayer]);
+      await api.dx12Params(packParams([depthLayer],{depth:{width:2.0,bias:0.05,fade:0.2,intensity:2.0}}).buffer);
+      const depthRimmed=await draw();
+      const depthError=diff(baseline,depthRimmed);
       // Restore the build-time default; pixels must return to baseline.
       const reset=await api.dx12Shader([]);
       const restored=await draw();
@@ -48,11 +67,13 @@ app.on('browser-window-created',(_event,win)=>win.webContents.once('did-finish-l
       catch(e){compileError=e.message;}
       const afterError=await draw();
       const stillWorks=diff(baseline,afterError);
-      return{load,reset,rimError,paramError,restoreError,compileError,stillWorks};
+      return{load,reset,rimError,paramError,depthLoad,depthError,restoreError,compileError,stillWorks};
     })()`);
     assert.ok(result.load.active===true,'Shader stack must become active');
     assert.ok(result.rimError.mean>0.2&&result.rimError.max>20,'User rim light must visibly change the character: '+JSON.stringify(result.rimError));
     assert.ok(result.paramError.mean>0.2,'Property modulation must change the result without recompiling: '+JSON.stringify(result.paramError));
+    assert.ok(result.depthLoad.active===true,'DepthRimLight must compile (sampleSceneDepth helper available)');
+    assert.ok(result.depthError.mean>0.2&&result.depthError.max>20,'Depth-based rim must visibly change the silhouette: '+JSON.stringify(result.depthError));
     assert.ok(result.reset.active===false,'Empty stack must restore the default');
     assert.ok(result.restoreError.max<=1,'Restored default must match baseline: '+JSON.stringify(result.restoreError));
     assert.ok(result.compileError,'Invalid HLSL must surface a compiler error');

@@ -37,6 +37,22 @@ void ToonRamp(inout ShadingContext ctx) {
     float band = floor(saturate(ctx.ndl) * steps) / steps;
     ctx.color *= lerp(shadowTint, float3(1,1,1), band);
 }` },
+  // Depth-based rim light (miHoYo-style): sample scene depth along the projected
+  // light direction and brighten the silhouette where depth breaks. Uses the
+  // prepass depth via sampleSceneDepth; relative diff suits the background=0 depth.
+  { name: 'DepthRimLight', code: `//@property float width = 1.0 [0,3] "림 폭"
+//@property float bias = 0.1 [0,1] "깊이 임계값"
+//@property float fade = 0.3 [0.01,1] "전이 폭"
+//@property float intensity = 1.0 [0,2] "강도"
+//@property float3 rimColor = (1,1,1) "림 색상"
+void DepthRimLight(inout ShadingContext ctx) {
+    float2 offsetBase = ctx.lightDirScreen / max(ctx.depth, 0.001);
+    float2 offsetUV = offsetBase * (3.0 * width) * (width * width);
+    float neighborDepth = sampleSceneDepth(ctx.pixel + offsetUV * ctx.viewportSize);
+    float rel = abs(neighborDepth - ctx.depth) / max(ctx.depth, 0.001);
+    float mask = saturate((rel - bias) / max(fade, 1e-5));
+    ctx.color += rimColor * mask * intensity;
+}` },
 ];
 
 let nextId = 1;

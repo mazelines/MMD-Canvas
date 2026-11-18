@@ -10,6 +10,10 @@ PMX(MMD) 모델을 미리 보고 **FBX / USD로 변환**하는 데스크톱 앱�
 
 [배포 파일 다운로드](https://github.com/mazelines/MMD-Canvas/releases) · [CI 실행 결과](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [릴리스 가이드](docs/releases.md)
 
+## v0.6.1: 깊이 기반 림라이트(DepthRimLight)
+
+miHoYo 계열 서브컬처 게임의 깊이 기반 림라이트 기법을 참고한 DepthRimLight 예제 함수를 추가했습니다. 프레넬 대신 광원 방향으로 화면공간 이웃 depth를 샘플링해 실루엣(깊이 단절)을 검출하고 림을 적용합니다. 이를 위해 셰이더 스택에 화면공간 depth 샘플링 헬퍼(sampleSceneDepth)와 viewportSize·lightDirScreen 컨텍스트 필드를 추가했습니다. 림 폭·깊이 임계값·전이 폭·강도·색상을 프로퍼티로 조절합니다. [구조와 문법](docs/shader-stack.md) · [0.6.1 변경 내용](docs/release-notes/v0.6.1.md).
+
 ## v0.6.0: 언리얼 스타일 셰이더 에디터와 머티리얼 프리뷰
 
 셰이더 스택 편집기를 언리얼 머티리얼 에디터 스타일의 작업 캔버스로 재설계했습니다. 가운데에는 머티리얼 구체 프리뷰(오빗 카메라)가 렌더링되고, 우측 스택 레이어는 드래그앤드롭으로 재정렬합니다. 레이어 경계의 + 아이콘으로 함수 목록 팝업을 열어 그 사이에 삽입하고, 선택 후 Del 키 또는 우클릭 메뉴로 삭제합니다. 프리뷰는 메인 뷰포트와 독립된 두 번째 DX12 호스트가 렌더링하며, 적용한 스택은 구체 프리뷰와 메인 캐릭터 양쪽에 반영됩니다. [구조와 문법](docs/shader-stack.md) · [0.6.0 변경 내용](docs/release-notes/v0.6.0.md).

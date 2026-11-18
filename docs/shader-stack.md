@@ -16,7 +16,9 @@ float4 colorMain(...) : SV_Target {
 }
 ```
 
-`ShadingContext`(`native/dx12/shading-context.hlsl`)는 표면(worldPos·normal·uv·viewDir·depth), 재질(albedo·emission·alpha), 라이팅 중간값(ndl·direct·shade·fill·ao), 결과(color·alpha)를 담습니다. 사용자 함수는 이 ctx를 in-place로 변형합니다.
+`ShadingContext`(`native/dx12/shading-context.hlsl`)는 표면(worldPos·normal·uv·viewDir·depth·pixel), 재질(albedo·emission·alpha), 라이팅 중간값(ndl·direct·shade·fill·ao·sunDir), 화면공간(viewportSize·lightDirScreen), 결과(color·alpha)를 담습니다. 사용자 함수는 이 ctx를 in-place로 변형합니다.
+
+**화면공간 depth 샘플링**: `sampleSceneDepth(pixel)` 헬퍼로 프리패스 깊이(`normalDepth`, t4)를 이웃 픽셀에서 읽을 수 있습니다(뷰공간 깊이, 배경=0). 이를 이용해 깊이 기반 림/엣지 효과를 만들 수 있습니다. `ctx.lightDirScreen`은 광원 방향을 화면 XY로 투영한 값(y 반전)입니다.
 
 ## 문법
 
@@ -49,7 +51,11 @@ void RimLight(inout ShadingContext ctx) {
 - **함수 스택(우측)**: 레이어를 **드래그앤드롭**으로 재정렬. 레이어 **경계 사이의 + 아이콘** 클릭 → 함수 카탈로그 **팝업** → 선택 시 그 사이에 삽입(함수 이름은 중복되지 않게 자동 부여). **제거**는 레이어 선택 후 **Del/Backspace** 또는 **우클릭 → 삭제** 메뉴. 활성 토글 체크박스.
 - **코드**: 선택 레이어의 HLSL을 CodeMirror로 편집, 적용 버튼(또는 Ctrl+S)으로 컴파일.
 - **프로퍼티**: `//@property` 선언에서 슬라이더/컬러픽커/체크박스 자동 생성. 변경 시 재컴파일 없이 값만 업로드.
-- 예제 레이어: RimLight, Fresnel, ColorGrade, ToonRamp (+ 빈 함수).
+- 예제 레이어: RimLight, Fresnel, ColorGrade, ToonRamp, **DepthRimLight** (+ 빈 함수).
+
+### DepthRimLight (깊이 기반 림라이트)
+
+miHoYo 계열 서브컬처 게임의 기법을 참고한 예제입니다. 프레넬(`N·V`) 대신 **광원 방향으로 화면공간 이웃 depth를 샘플링**해 깊이 단절(실루엣)을 검출하고 림을 적용합니다. `offset = lightDirScreen/depth × (3·width)·width²`로 샘플 좌표를 만들고, `Δz = |이웃깊이 − 자기깊이|/자기깊이`를 `saturate((Δz−bias)/fade)`로 마스크화해 색에 더합니다. 배경 depth=0 규약에 맞춰 상대 차분을 쓰며, 광원 쪽 실루엣에 림이 걸립니다. 파라미터: 림 폭·깊이 임계값(bias)·전이 폭(fade)·강도·림 색상. 원신/스타레일/JTRP/MooaToon은 오프셋 방향과 임계값이 서로 다르며, 이 예제는 광원 방향(MooaToon) 방식입니다.
 
 **프리뷰 렌더링 아키텍처**: 프리뷰는 메인 호스트와 **독립된 두 번째 `Dx12Host`**(`previewDx12`, 별도 네이티브 자식 프로세스)가 편집 창에 presenting합니다. `Dx12Host`/네이티브는 per-instance라 단일 인스턴스 가정이 없습니다. main은 `dx12:*` IPC를 **sender 기반**으로 디스패치(편집 창 발신 → previewDx12, 그 외 → dx12)하고, `dx12:presented` ack도 sender로 양 호스트에 라우팅합니다. 셰이더 스택은 **컴파일 1회 → 양 호스트 fan-out**(`loadShaderStack`). 편집 창은 `Viewer`/`Dx12Viewport`/`nativeModel`을 재사용해 구체를 렌더링하며, 프리뷰는 MSAA(AA mode 0)로 DLSS feature 생성을 피합니다. 창을 닫으면 `previewDx12.stop()`으로 자식 프로세스를 정리합니다.
 
