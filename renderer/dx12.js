@@ -223,5 +223,8 @@ export class Dx12Viewport {
       }
     } catch(e) { this.fail(e);
     } finally {this.busy=false;}
+    // A request may have set dirty while this flush was exiting (busy still true,
+    // so it did not start a new flush). Pick it up now to avoid a stalled viewport.
+    if(this.enabled && this.dirty && !this.busy) this.flush();
   }
 }

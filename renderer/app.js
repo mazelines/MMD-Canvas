@@ -1,7 +1,6 @@
 import { t, setLanguage, getLanguage, formatNumber, translateStatic } from '../src/i18n/index.js';
 import { Viewer, VIEWABLE } from './viewer.js';
 import { MaterialPanel } from './material-panel.js';
-import { ShaderStackPanel } from './shader-stack-panel.js';
 import { captureWorkspace, restoreWorkspaceState } from './workspace-state.js';
 import { DEFAULT_LIGHT_LUX, DEFAULT_AMBIENT_LUX, DEFAULT_EV100, clampLightLux, legacyLightToLux } from '../src/core/lighting.js';
 import { DEFAULT_CORTAO } from '../src/core/ambient-occlusion.js';
@@ -40,8 +39,14 @@ const applySharpen=(value,save=true)=>{
 $('viewport-sharpen').addEventListener('input',()=>applySharpen($('viewport-sharpen').value));
 applySharpen(viewer.dx12.sharpen,false);
 const materialPanel = new MaterialPanel(viewer);
-const shaderPanel = new ShaderStackPanel(viewer);
-viewer.shaderPanel = shaderPanel;
+// Shader stack editing lives in a separate window; main owns the stack state and
+// serializes shader loads against renders via the host channel mutex. On apply,
+// re-render the main viewport (the shader swap resets temporal history so DLAA
+// converges to the new result).
+// The main process kicks a re-render after a shader hot-swap. Expose a direct
+// hook (invoked via executeJavaScript) plus the IPC listener as a fallback.
+window.__shaderStackRender = () => viewer.requestRender();
+api.onShaderStackApplied(() => viewer.requestRender());
 const applyRenderMode = (mode, save = false) => {
   viewer.setRenderMode(mode);
   $('toon-settings').hidden = viewer.renderMode !== 'toon';
@@ -711,7 +716,9 @@ async function saveWorkspace(saveAs = false) {
   if (state.workspaceBusy || state.modelLoading || state.busy) return;
   state.workspaceBusy = true; updateWorkspaceBar();
   try {
-    const result = await api.saveWorkspace(captureWorkspace(viewer, state, materialPanel), state.workspacePath, saveAs);
+    const data = captureWorkspace(viewer, state, materialPanel);
+    data.viewport.shaderStack = await api.shaderStackGet();
+    const result = await api.saveWorkspace(data, state.workspacePath, saveAs);
     if (!result) return;
     state.workspacePath = result.filePath;
     localStorage.setItem('lastWorkspace', result.filePath);
@@ -747,6 +754,7 @@ async function openWorkspace(filePath = null, { remember = true } = {}) {
     state.restoring = true; // controls are driven through their own events; keep those out of the saved defaults
     try { changed = restoreWorkspaceState(data, viewer, state, materialPanel, applyRenderMode, applyOutline); }
     finally { state.restoring = false; reportMenuState(); }
+    await api.shaderStackApply(data.viewport.shaderStack || []);
     $('convert-dialog').close(); $('convert-result').hidden = true; state.lastOutput = null;
     state.workspacePath = result.filePath;
     if (remember) localStorage.setItem('lastWorkspace', result.filePath);

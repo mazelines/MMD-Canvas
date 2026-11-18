@@ -1,6 +1,6 @@
 # 셰이더 스택 에디터
 
-인스펙터의 **셰이더 스택** 탭에서 사용자가 작성한 HLSL 함수를 스택으로 쌓아 PMX 캐릭터의 표면 셰이딩을 확장합니다. 노드 그래프가 아닌 **코드 편집 기반**이며, 함수가 선언한 프로퍼티는 스택 내용에 따라 UI에 **자동 생성**됩니다. 후처리가 아니라 캐릭터 표면 셰이딩(`colorMain`) 위주입니다.
+**보기 메뉴 → 셰이더 스택 편집기…**(Ctrl+Shift+K)로 여는 **별도의 편집 전용 창**에서 사용자가 작성한 HLSL 함수를 스택으로 쌓아 PMX 캐릭터의 표면 셰이딩을 확장합니다. 노드 그래프가 아닌 **코드 편집 기반**이며, 함수가 선언한 프로퍼티는 스택 내용에 따라 UI에 **자동 생성**됩니다. 후처리가 아니라 캐릭터 표면 셰이딩(`colorMain`) 위주입니다. 창에는 미리보기가 없으며 적용 결과는 **메인 창 뷰포트**에 반영됩니다.
 
 ## 구조
 
@@ -43,21 +43,23 @@ void RimLight(inout ShadingContext ctx) {
 
 ## 에디터 UI
 
-`renderer/shader-stack-panel.js` (CodeMirror 5 벤더링, `renderer/vendor/codemirror/`):
+별도 창(`renderer/shader-stack.html` + `shader-stack-window.js`)이 `renderer/shader-stack-panel.js`(CodeMirror 5 벤더링, `renderer/vendor/codemirror/`)를 호스팅합니다:
 - **함수 스택**: 추가(예제 카탈로그 순환)·제거·활성 토글·↑↓ 재정렬.
 - **코드**: 선택 레이어의 HLSL을 CodeMirror로 편집, 적용 버튼(또는 Ctrl+S)으로 컴파일.
 - **프로퍼티**: `//@property` 선언에서 슬라이더/컬러픽커/체크박스 자동 생성. 변경 시 재컴파일 없이 값만 업로드.
 - 예제 레이어: RimLight, Fresnel, ColorGrade, ToonRamp.
 
+**상태는 main 프로세스가 단일 출처로 소유**합니다(`shaderStack`). 편집 창은 `shader-stack:get/apply/params` IPC로 조회·갱신하고, main이 컴파일·핫스왑·파라미터 업로드 후 메인 창에 재렌더를 알립니다. 렌더 채널은 호스트 mutex(`Dx12Host.serial`)로 직렬화되어 셰이더 로드가 진행 중인 렌더와 충돌하지 않습니다. 셰이더 핫스왑 시 네이티브가 시간 이력을 리셋해 DLAA가 새 결과로 수렴합니다.
+
 ## 영속화
 
-워크스페이스 `.canvas`의 `viewport.shaderStack`에 `{id,name,code,enabled,params}` 목록으로 저장됩니다. `captureWorkspace`/`restoreWorkspaceState`/`validateWorkspace` 3곳 모두 관여하며, 검증자는 strict allowlist로 코드≤32768자·params 키≤256개로 제한합니다.
+워크스페이스 `.canvas`의 `viewport.shaderStack`에 `{id,name,code,enabled,params}` 목록으로 저장됩니다. 저장 시 메인 창이 `shader-stack:get`으로 main 상태에서 직렬화하고, 복원 시 `shader-stack:apply`로 main 상태에 반영합니다. `validateWorkspace`는 strict allowlist로 코드≤32768자·params 키≤256개로 제한합니다. 창을 닫아도 상태는 main에 유지되어 재열기 시 복원됩니다.
 
 ## 검증
 
 - `npm test`: 파서 단위 테스트(`tests/shader-stack-tests.js`) + 워크스페이스 왕복.
 - `npm run test:shader-stack`: 실제 GPU에서 런타임 컴파일→핫스왑→픽셀 변화→프로퍼티 변조→기본 복원(비트 동일)→컴파일 오류 생존.
-- `npm run test:shader-ui`: 실제 DOM에서 탭·함수 추가·CodeMirror·자동 프로퍼티·영속화 왕복.
+- `npm run test:shader-ui`: 메뉴로 창 열기·함수 추가·CodeMirror·자동 프로퍼티·메인 뷰포트 픽셀 변화·reset 복원·영속화 왕복.
 - `npm run test:dx12`/`test:dlss`: 베이스 분리 후 기존 셰이딩 불변 회귀.
 
 ## 제한과 주의
