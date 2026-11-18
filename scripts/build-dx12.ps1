@@ -29,3 +29,8 @@ if ($LASTEXITCODE -ne 0) { throw 'DX12 native build failed.' }
 Write-Output "Built $nativeOut/mmd-dx12.exe"
 Copy-Item -LiteralPath (Join-Path $repoRoot 'renderer/vendor/cortao/32x32x24x32_R32_UINT.bin') -Destination $nativeOut
 Copy-Item -LiteralPath (Join-Path $dlssRoot 'lib/Windows_x86_64/rel/nvngx_dlss.dll') -Destination $nativeOut
+# DXC runtime compiler for user-authored shader stacks. These are Windows SDK
+# redistributables (Redist/D3D); the same files ship in bin/<ver>/x64 used above.
+foreach ($tool in @('dxc.exe', 'dxcompiler.dll', 'dxil.dll')) {
+  Copy-Item -LiteralPath (Join-Path $sdkBin $tool) -Destination $nativeOut
+}

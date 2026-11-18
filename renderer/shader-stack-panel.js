@@ -1,0 +1,216 @@
+import { t } from '../src/i18n/index.js';
+import { parseLayer, parseStack, packParams } from '../src/core/shader-stack.js';
+
+const node = (tag, props = {}, ...children) => {
+  const element = Object.assign(document.createElement(tag), props);
+  element.append(...children);
+  return element;
+};
+
+// Built-in example layers users can add and edit. Each is a void function on the
+// shared ShadingContext with //@property annotations driving the property UI.
+export const SHADER_EXAMPLES = [
+  { name: 'RimLight', code: `//@property float strength = 0.5 [0,1] "림 강도"
+//@property float3 rimColor = (1,1,1) "림 색상"
+//@property float power = 3 [1,8] "림 날카로움"
+void RimLight(inout ShadingContext ctx) {
+    float rim = pow(1 - saturate(dot(ctx.normal, ctx.viewDir)), power);
+    ctx.color += rimColor * rim * strength;
+}` },
+  { name: 'Fresnel', code: `//@property float3 tint = (0.2,0.5,1) "프레넬 색상"
+//@property float strength = 0.4 [0,1] "강도"
+void Fresnel(inout ShadingContext ctx) {
+    float f = pow(1 - saturate(dot(ctx.normal, ctx.viewDir)), 5);
+    ctx.color = lerp(ctx.color, ctx.color + tint, f * strength);
+}` },
+  { name: 'ColorGrade', code: `//@property float3 multiply = (1,1,1) "곱하기"
+//@property float3 add = (0,0,0) "더하기"
+//@property float saturation = 1 [0,2] "채도"
+void ColorGrade(inout ShadingContext ctx) {
+    float3 c = ctx.color * multiply + add;
+    float luma = dot(c, float3(0.2126, 0.7152, 0.0722));
+    ctx.color = lerp(luma.xxx, c, saturation);
+}` },
+  { name: 'ToonRamp', code: `//@property float steps = 4 [2,8] "단계 수"
+//@property float3 shadowTint = (0.6,0.65,0.8) "그림자 색"
+void ToonRamp(inout ShadingContext ctx) {
+    float band = floor(saturate(ctx.ndl) * steps) / steps;
+    ctx.color *= lerp(shadowTint, float3(1,1,1), band);
+}` },
+];
+
+let nextId = 1;
+const makeLayer = (name, code) => ({ id: `layer-${nextId++}`, name, code, enabled: true, params: {} });
+
+export class ShaderStackPanel {
+  constructor(viewer) {
+    this.viewer = viewer;
+    this.$ = id => document.getElementById(id);
+    this.stack = [];
+    this.selected = -1;
+    this.editor = null;
+    this.applying = false;
+    this.$('shader-add').addEventListener('click', () => this.addExample());
+    this.$('shader-reset').addEventListener('click', () => { this.stack = []; this.selected = -1; this.render(); this.apply(); });
+    this.$('shader-apply').addEventListener('click', () => this.apply());
+    this.render();
+  }
+
+  // ---- persistence hooks (workspace capture/restore) ----
+  getStack() { return this.stack.map(l => ({ id: l.id, name: l.name, code: l.code, enabled: l.enabled, params: l.params })); }
+  setStack(layers) {
+    this.stack = (layers || []).map(l => ({ id: l.id || `layer-${nextId++}`, name: l.name, code: l.code, enabled: l.enabled !== false, params: l.params || {} }));
+    this.selected = this.stack.length ? 0 : -1;
+    this.render();
+  }
+
+  addExample() {
+    // Cycle through examples so repeated adds give variety.
+    const example = SHADER_EXAMPLES[this.stack.length % SHADER_EXAMPLES.length];
+    const layer = makeLayer(example.name, example.code);
+    this.stack.push(layer);
+    this.selected = this.stack.length - 1;
+    this.render();
+    this.apply();
+  }
+
+  render() {
+    this.renderStack();
+    this.renderEditor();
+    this.renderProperties();
+  }
+
+  renderStack() {
+    const list = this.$('shader-stack');
+    list.replaceChildren();
+    if (!this.stack.length) {
+      list.append(node('li', { className: 'material-empty', textContent: t('함수 추가를 눌러 셰이더 레이어를 쌓으세요.') }));
+      return;
+    }
+    this.stack.forEach((layer, i) => {
+      const row = node('li', { className: i === this.selected ? 'active' : '' });
+      row.dataset.index = i;
+      const toggle = node('input', { type: 'checkbox', checked: layer.enabled, title: t('활성화') });
+      toggle.addEventListener('change', () => { layer.enabled = toggle.checked; this.apply(); });
+      const select = node('button', { className: 'shader-select', textContent: layer.name, ariaPressed: String(i === this.selected) });
+      select.addEventListener('click', () => { this.selected = i; this.render(); });
+      const up = node('button', { className: 'link', textContent: '↑', title: t('위로'), disabled: i === 0 });
+      up.addEventListener('click', () => { [this.stack[i - 1], this.stack[i]] = [this.stack[i], this.stack[i - 1]]; this.selected = i - 1; this.render(); this.apply(); });
+      const down = node('button', { className: 'link', textContent: '↓', title: t('아래로'), disabled: i === this.stack.length - 1 });
+      down.addEventListener('click', () => { [this.stack[i + 1], this.stack[i]] = [this.stack[i], this.stack[i + 1]]; this.selected = i + 1; this.render(); this.apply(); });
+      const remove = node('button', { className: 'link', textContent: '✕', title: t('제거') });
+      remove.addEventListener('click', () => { this.stack.splice(i, 1); this.selected = Math.min(this.selected, this.stack.length - 1); this.render(); this.apply(); });
+      row.append(toggle, select, up, down, remove);
+      list.append(row);
+    });
+  }
+
+  renderEditor() {
+    const host = this.$('shader-editor-host');
+    const layer = this.stack[this.selected];
+    this.$('shader-name').textContent = layer ? layer.name : '';
+    if (!layer) {
+      if (this.editor) { this.editor.toTextArea(); this.editor = null; }
+      host.replaceChildren(node('div', { className: 'muted', textContent: t('레이어를 선택하세요.') }));
+      return;
+    }
+    if (!this.editor) {
+      host.replaceChildren();
+      const ta = node('textarea', { id: 'shader-code' });
+      host.append(ta);
+      this.editor = window.CodeMirror.fromTextArea(ta, {
+        mode: 'text/x-c++src', theme: 'material-darker', lineNumbers: true,
+        indentUnit: 4, tabSize: 4, indentWithTabs: false, lineWrapping: false,
+        extraKeys: { 'Ctrl-S': () => this.apply(), 'Cmd-S': () => this.apply() },
+      });
+      this.editor.on('change', () => { layer.code = this.editor.getValue(); });
+    }
+    if (this.editor.getValue() !== layer.code) this.editor.setValue(layer.code);
+  }
+
+  renderProperties() {
+    const host = this.$('shader-properties');
+    host.replaceChildren();
+    const layer = this.stack[this.selected];
+    if (!layer) { host.append(node('div', { className: 'muted', textContent: t('레이어를 선택하세요.') })); return; }
+    const info = parseLayer(layer.code);
+    if (info.errors.length) host.append(node('div', { className: 'shader-error', textContent: info.errors.join('\n') }));
+    if (!info.properties.length) { host.append(node('div', { className: 'muted', textContent: t('//@property 주석으로 파라미터를 선언하세요.') })); return; }
+    for (const prop of info.properties) {
+      const value = layer.params[prop.name] !== undefined ? layer.params[prop.name] : prop.default;
+      const row = node('label', { className: 'shader-prop-row', title: prop.label });
+      row.append(node('span', { textContent: prop.label }));
+      const commit = v => { layer.params[prop.name] = v; this.applyParams(); };
+      if (prop.type === 'bool') {
+        const input = node('input', { type: 'checkbox', checked: !!value });
+        input.addEventListener('change', () => commit(input.checked ? 1 : 0));
+        row.append(input);
+      } else if (prop.type === 'color' || prop.type === 'float3') {
+        const arr = Array.isArray(value) ? value : [0, 0, 0];
+        const hex = '#' + arr.slice(0, 3).map(c => Math.round(Math.max(0, Math.min(1, c)) * 255).toString(16).padStart(2, '0')).join('');
+        const input = node('input', { type: 'color', value: hex });
+        input.addEventListener('input', () => { const n = parseInt(input.value.slice(1), 16); commit([((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]); });
+        row.append(input);
+      } else if (prop.type === 'float' || prop.type === 'int') {
+        if (prop.min !== null && prop.max !== null) {
+          const range = node('input', { type: 'range', min: prop.min, max: prop.max, step: prop.type === 'int' ? 1 : 0.01, value });
+          const out = node('output', { textContent: String(value) });
+          range.addEventListener('input', () => { out.textContent = range.value; commit(Number(range.value)); });
+          row.append(range, out);
+        } else {
+          const input = node('input', { type: 'number', value, step: prop.type === 'int' ? 1 : 0.01 });
+          input.addEventListener('change', () => commit(Number(input.value)));
+          row.append(input);
+        }
+      } else {
+        const arr = Array.isArray(value) ? value : [];
+        const input = node('input', { type: 'text', value: arr.join(', '), spellcheck: false });
+        input.addEventListener('change', () => commit(input.value.split(',').map(s => Number(s.trim()) || 0)));
+        row.append(input);
+      }
+      host.append(row);
+    }
+  }
+
+  setError(message) {
+    const box = this.$('shader-error');
+    box.hidden = !message;
+    box.textContent = message || '';
+  }
+
+  paramValues() { return Object.fromEntries(this.stack.map(l => [l.id, l.params || {}])); }
+
+  // Property-only update: no recompile, just upload values and re-render.
+  async applyParams() {
+    if (!this.stack.some(l => l.enabled)) return;
+    try { await window.api.dx12Params(packParams(this.stack, this.paramValues()).buffer); this.viewer.requestRender(); }
+    catch (e) { this.setError(e.message); }
+  }
+
+  // Full apply: compile + hot-swap the stack, then upload parameters.
+  async apply() {
+    if (this.applying) return;
+    this.applying = true;
+    const dx = this.viewer.dx12;
+    const wasEnabled = dx.enabled;
+    dx.enabled = false; dx.dirty = false;
+    for (let i = 0; i < 100 && dx.busy; i++) await new Promise(r => setTimeout(r, 20));
+    this.$('shader-status').textContent = t('컴파일 중…');
+    try {
+      const active = this.stack.filter(l => l.enabled);
+      if (!active.length) await window.api.dx12Shader([]);
+      else {
+        await window.api.dx12Shader(this.stack.map(l => ({ id: l.id, name: l.name, code: l.code, enabled: l.enabled })));
+        await window.api.dx12Params(packParams(this.stack, this.paramValues()).buffer);
+      }
+      this.setError(null);
+      this.$('shader-status').textContent = active.length ? t('적용됨') : t('기본 셰이딩');
+    } catch (e) {
+      this.setError(e.message);
+      this.$('shader-status').textContent = t('컴파일 오류');
+    }
+    dx.enabled = wasEnabled;
+    this.viewer.requestRender();
+    this.applying = false;
+  }
+}

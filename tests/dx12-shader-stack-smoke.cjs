@@ -1,0 +1,64 @@
+// Real GPU end-to-end test: runtime-compile a user shader stack, hot-swap the
+// character color PSOs, verify the pixels change, restore the default, and
+// surface compiler errors without killing the renderer.
+const {app}=require('electron');
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+app.setPath('userData',fs.mkdtempSync(path.join(require('node:os').tmpdir(),'mmd-stack-')));
+process.env.MMDCONV_OPEN=path.resolve('Example/Zhuang Fangyi/Zhuang Fangyi.canvas');
+delete process.env.MMDCONV_SHOT;
+const timeout=setTimeout(()=>{console.error('Shader stack test timed out');app.exit(1)},180000);
+const RIM=`//@property float strength = 0.5 [0,1] "강도"
+//@property float3 tint = (1,0,0) "색상"
+void RimLight(inout ShadingContext ctx) {
+    float rim = pow(1 - saturate(dot(ctx.normal, ctx.viewDir)), 3);
+    ctx.color += tint * rim * strength;
+}`;
+app.on('browser-window-created',(_event,win)=>win.webContents.once('did-finish-load',async()=>{
+  try {
+    await win.webContents.executeJavaScript(`(async()=>{
+      for(let i=0;i<1500;i++){const v=window.__viewer;if(v?.dx12.error)throw new Error(v.dx12.error.message);if(v?.current&&v.dx12.lastFrame&&!v.dx12.busy)return;await new Promise(r=>setTimeout(r,20));}
+      throw new Error('Startup did not converge');
+    })()`);
+    const result=await win.webContents.executeJavaScript(`(async()=>{
+      const v=__viewer;v.dx12.enabled=false;v.controls.update=()=>false;
+      const THREE=await import('three'),b=new THREE.Box3().setFromObject(v.current.object);
+      const head=b.getCenter(new THREE.Vector3()).setY(b.max.y-b.getSize(new THREE.Vector3()).y*0.18),offset=v.camera.position.clone().sub(v.controls.target);
+      v.camera.position.copy(head).addScaledVector(offset,0.5);v.camera.lookAt(head);v.camera.aspect=1;v.camera.updateProjectionMatrix();v.camera.updateMatrixWorld();
+      const draw=async()=>{const data=v.dx12.frame(),f=new Float32Array(data,4);f[44]=256;f[45]=256;f[67]=0;f[50]=0;f[51]=0;f[72]=0;await api.dx12Render(data);const c=document.getElementById('dx12-canvas');return c.getContext('2d').getImageData(0,0,c.width,c.height).data;};
+      const diff=(a,b)=>{let sum=0,max=0;for(let i=0;i<a.length;i+=4)for(let j=0;j<3;j++){const d=Math.abs(a[i+j]-b[i+j]);sum+=d;max=Math.max(max,d);}return{mean:sum/(a.length*0.75),max};};
+      const {packParams}=await import('../src/core/shader-stack.js');
+      const layer={id:'rim',name:'RimLight',code:${JSON.stringify(RIM)},enabled:true};
+      const baseline=await draw();
+      // Apply a user rim-light layer; the color PSOs hot-swap to the compiled stack.
+      const load=await api.dx12Shader([layer]);
+      await api.dx12Params(packParams([layer],{rim:{strength:0.5,tint:[1,0,0]}}).buffer);
+      const rimmed=await draw();
+      const rimError=diff(baseline,rimmed);
+      // Modulate properties without recompiling: stronger green rim must differ.
+      await api.dx12Params(packParams([layer],{rim:{strength:1.0,tint:[0,1,0]}}).buffer);
+      const modulated=await draw();
+      const paramError=diff(rimmed,modulated);
+      // Restore the build-time default; pixels must return to baseline.
+      const reset=await api.dx12Shader([]);
+      const restored=await draw();
+      const restoreError=diff(baseline,restored);
+      // A compiler error must reject without killing the renderer.
+      let compileError=null;
+      try{await api.dx12Shader([{name:'Bad',code:'void Bad(inout ShadingContext ctx){ not valid hlsl }',enabled:true}]);}
+      catch(e){compileError=e.message;}
+      const afterError=await draw();
+      const stillWorks=diff(baseline,afterError);
+      return{load,reset,rimError,paramError,restoreError,compileError,stillWorks};
+    })()`);
+    assert.ok(result.load.active===true,'Shader stack must become active');
+    assert.ok(result.rimError.mean>0.2&&result.rimError.max>20,'User rim light must visibly change the character: '+JSON.stringify(result.rimError));
+    assert.ok(result.paramError.mean>0.2,'Property modulation must change the result without recompiling: '+JSON.stringify(result.paramError));
+    assert.ok(result.reset.active===false,'Empty stack must restore the default');
+    assert.ok(result.restoreError.max<=1,'Restored default must match baseline: '+JSON.stringify(result.restoreError));
+    assert.ok(result.compileError,'Invalid HLSL must surface a compiler error');
+    assert.ok(result.stillWorks.max<=1,'Renderer must survive a compile error and keep the default: '+JSON.stringify(result.stillWorks));
+    console.log('Shader stack end-to-end passed:',JSON.stringify({rimError:result.rimError,restoreError:result.restoreError,compileError:result.compileError.slice(0,120)}));
+    clearTimeout(timeout);app.quit();
+  }catch(error){console.error(error);clearTimeout(timeout);app.exit(1)}
+}));
+import('../electron/main.js');

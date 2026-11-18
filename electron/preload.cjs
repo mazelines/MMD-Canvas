@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld('api', {
   dx12Model: (data) => call('dx12:model', data),
   dx12Pose: (data) => call('dx12:pose', data),
   dx12Render: (data) => call('dx12:render', data),
+  dx12Shader: (layers) => call('dx12:shader', layers),
+  dx12Params: (data) => call('dx12:params', data),
   dx12Stop: () => call('dx12:stop'),
   startup: () => call('app:startup'),
   list: (dir) => call('fs:list', dir),

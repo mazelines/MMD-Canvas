@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { convertPmxFile, OUTPUT_FORMATS } from '../src/core/convert.js';
 import { readWorkspace, writeWorkspace, networkPaths } from '../src/core/workspace.js';
 import { Dx12Host } from './dx12.js';
+import { compileShaderStack } from './shader-compiler.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Three.js supplies scene/loader data only; browser 3D rendering is disabled.
@@ -190,6 +191,12 @@ handle('dx12:start', () => dx12.start());
 handle('dx12:model', data => dx12.model(data));
 handle('dx12:pose', data => dx12.pose(data));
 handle('dx12:render', data => dx12.render(data));
+handle('dx12:shader', async layers => {
+  if (!layers || !layers.length) return dx12.shader(null);
+  const blobs = await compileShaderStack(layers);
+  return dx12.shader(blobs.color, blobs.aa);
+});
+handle('dx12:params', data => dx12.setParams(data));
 handle('dx12:stop', () => dx12.stop());
 
 handle('app:startup', async () => {

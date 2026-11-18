@@ -10,6 +10,12 @@ PMX(MMD) 모델을 미리 보고 **FBX / USD로 변환**하는 데스크톱 앱�
 
 [배포 파일 다운로드](https://github.com/mazelines/MMD-Canvas/releases) · [CI 실행 결과](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [릴리스 가이드](docs/releases.md)
 
+## v0.5.7: 셰이더 스택 에디터
+
+인스펙터의 **셰이더 스택** 탭에서 사용자가 작성한 HLSL 함수를 스택으로 쌓아 PMX 캐릭터의 표면 셰이딩을 확장합니다. 노드 그래프가 아닌 코드 편집 기반이며, 내장 라이팅은 고정 베이스로 유지하고 그 위에 `void fn(inout ShadingContext ctx)` 레이어를 순서대로 추가합니다. `//@property` 주석으로 선언한 파라미터는 스택 내용에 따라 UI에 자동 생성되고, 값 변경은 재컴파일 없이 반영됩니다.
+
+함수는 동봉된 DXC로 런타임 컴파일되어 네이티브 color PSO를 핫스왑하며, 기본(스택 없음)은 기존 셰이딩과 비트 동일합니다. RimLight·Fresnel·ColorGrade·ToonRamp 예제와 워크스페이스 저장·복원을 제공합니다. DXC(Windows SDK 재배포)와 CodeMirror(MIT)를 설치 파일에 포함합니다. [구조와 문법](docs/shader-stack.md) · [0.5.7 변경 내용](docs/release-notes/v0.5.7.md).
+
 ## v0.5.6: 그리드 품질과 NVIDIA 샤픈
 
 낮은 카메라 각도에서 그리드 선이 끊기거나 깜빡이던 문제를 수정했습니다. 출력 해상도와 바닥의 투영 크기로 선을 필터링하고, 멀리서 촘촘해지는 선과 외곽을 부드럽게 처리합니다. 그리드는 기본적으로 꺼져 있으며 첫 실행의 번들 캔버스에도 적용됩니다. 반투명 재질은 머티리얼 목록의 체크박스를 노란색으로 표시합니다.

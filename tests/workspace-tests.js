@@ -15,7 +15,7 @@ export function sampleWorkspace() {
       cortao: { enabled: true, intensity: 1, radius: 2 },
       lightIntensity: 12500.5, lightUnit: 'lux', ambientIntensity: 3.5, lightDirection: [1, 2, 3], shadowEnabled: true, shadowSoftness: 0.04, gizmo: true,
       gizmoSpace: 'world', gizmoMode: 'rotate', gizmoPosition: [1, 4, 5],
-      camera: { position: [2, 4, 7], target: [0, 1, 0], up: [0, 1, 0], fov: 35, zoom: 1, near: 0.1, far: 100, maxDistance: 50 } },
+      camera: { position: [2, 4, 7], target: [0, 1, 0], up: [0, 1, 0], fov: 35, zoom: 1, near: 0.1, far: 100, maxDistance: 50 }, shaderStack: [] },
     conversion: { mode: 'single', format: 'usdz', output: 'C:\\project\\export\\キャラクター.usdz', source: 'C:\\project\\models\\캐릭터.pmx', scale: 8, nameMode: 'english', morphs: true, copyTextures: true, asciiNames: true, recursive: false },
     inspector: { tab: 'materials', selectedMaterial: 0, filter: '体', soloVisibility: [true] },
   };

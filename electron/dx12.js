@@ -95,6 +95,22 @@ export class Dx12Host {
   }
   async model(bytes) { if (!(bytes instanceof ArrayBuffer) || bytes.byteLength > 512 * 1024 * 1024) throw new Error('Invalid native model packet'); return this.request('model', 1, bytes); }
   async pose(bytes) { if (!(bytes instanceof ArrayBuffer) || bytes.byteLength > 160 * 1024 * 1024) throw new Error('Invalid native pose packet'); return this.request('pose', 5, bytes); }
+  // Hot-swap the character color PSOs with runtime-compiled blobs. Pass null to
+  // restore the build-time default shader. Layout: u32 colorLen, color, u32 aaLen, aa.
+  async shader(colorBlob, aaBlob) {
+    let bytes;
+    if (!colorBlob) bytes = new ArrayBuffer(0);
+    else {
+      const color = Buffer.from(colorBlob), aa = Buffer.from(aaBlob);
+      const colorLen = Buffer.alloc(4), aaLen = Buffer.alloc(4);
+      colorLen.writeUInt32LE(color.length, 0); aaLen.writeUInt32LE(aa.length, 0);
+      bytes = Buffer.concat([colorLen, color, aaLen, aa]);
+    }
+    const result = await this.request('shader', 6, bytes);
+    if (!result.ok) throw new Error(result.error || 'Shader load failed');
+    return result;
+  }
+  async setParams(data) { if (!(data instanceof ArrayBuffer)) throw new Error('Invalid shader params'); return this.request('params', 7, data); }
   async render(bytes) {
     if (!(bytes instanceof ArrayBuffer) || bytes.byteLength !== 308) throw new Error('Invalid native frame packet');
     // Backpressure: the native command loop must stay free to receive release

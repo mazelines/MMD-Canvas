@@ -26,7 +26,7 @@ struct NativeRenderer {
     ComPtr<ID3D12PipelineState> normalPso, colorPso, transparentPso, outlinePso, wirePso, packPso, mipPso, aoPso, outputPso, sharpenPso;
     ComPtr<ID3D12PipelineState> shadowTracePso, shadowTemporalPso, shadowSpatialPso, shadowFinalPso;
     ComPtr<ID3D12PipelineState> aaColorPso, aaTransparentPso, aaOutlinePso, aaPreparePso;
-    ComPtr<ID3D12Resource> aaOutput, aaMotion, aaDepth, aaExposure, composite, nisConfig;
+    ComPtr<ID3D12Resource> aaOutput, aaMotion, aaDepth, aaExposure, composite, nisConfig, userParams;
     ComPtr<ID3D12Resource> vertexBuffer, triangleBuffer, materialBuffer, indexBuffer, blas, tlas, scratch, instances, constants;
     ComPtr<ID3D12Resource> normal, depth, hdr, hdrMs, depthMs, packedBuffer, aoTexture, sharedOutput, lut;
     ComPtr<ID3D12Resource> previousVertexBuffer, motion, shadowRawTexture, shadowGuideTexture;
@@ -48,6 +48,7 @@ struct NativeRenderer {
     bool hasModel = false;
     bool outlines = false;
     bool wireframe = false;
+    bool userShaderActive = false;
     explicit NativeRenderer(Device& device, const std::filesystem::path& dir, DWORD parentPid) : d(device), directory(dir), dlss(device,dir) {
         parent = OpenProcess(PROCESS_DUP_HANDLE, FALSE, parentPid);
         if (!parent) throw std::runtime_error("Cannot share textures with the host process");
@@ -59,7 +60,7 @@ struct NativeRenderer {
         h.NumDescriptors = 2; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
         check(d.device->CreateDescriptorHeap(&h, IID_PPV_ARGS(&dsvs)), "Create depth view");
         D3D12_DESCRIPTOR_RANGE ranges[2]{};
-        ranges[0] = {D3D12_DESCRIPTOR_RANGE_TYPE_SRV,149,0,0,0}; ranges[1] = {D3D12_DESCRIPTOR_RANGE_TYPE_UAV,14,0,0,0};
+        ranges[0] = {D3D12_DESCRIPTOR_RANGE_TYPE_SRV,150,0,0,0}; ranges[1] = {D3D12_DESCRIPTOR_RANGE_TYPE_UAV,14,0,0,0};
         D3D12_ROOT_PARAMETER params[4]{};
         params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV; params[0].Descriptor.ShaderRegister = 0;
         params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS; params[1].Constants = {1,0,4};
@@ -98,7 +99,12 @@ struct NativeRenderer {
         shadowTracePso=compute("shadowTraceMain");shadowTemporalPso=compute("shadowTemporalMain");shadowSpatialPso=compute("shadowSpatialMain");shadowFinalPso=compute("shadowSpatialFinalMain");
         constants = buffer(768,D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
         // Populate unused descriptors, including texture slots, with safe null resources.
-        for(uint32_t i=0;i<149;i++) { D3D12_SHADER_RESOURCE_VIEW_DESC v{}; v.Format=DXGI_FORMAT_R8G8B8A8_UNORM; v.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D; v.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; v.Texture2D.MipLevels=1; d.device->CreateShaderResourceView(nullptr,&v,cpu(i)); }
+        for(uint32_t i=0;i<150;i++) { D3D12_SHADER_RESOURCE_VIEW_DESC v{}; v.Format=DXGI_FORMAT_R8G8B8A8_UNORM; v.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D; v.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; v.Texture2D.MipLevels=1; d.device->CreateShaderResourceView(nullptr,&v,cpu(i)); }
+        // User shader-stack parameters: persistent upload-heap structured buffer at
+        // t149 (slot 149). The runtime color shader reads float4 property slots from
+        // it; the default shader never reads t149, so binding it always is harmless.
+        userParams = buffer(4096,D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
+        structured(userParams.Get(),149,256,16);
         std::ifstream in(directory / "32x32x24x32_R32_UINT.bin",std::ios::binary);
         std::vector<uint8_t> table((std::istreambuf_iterator<char>(in)),{}); if(table.size()!=98304) throw std::runtime_error("CORTAO lookup table is missing");
         d.begin(); lut = texture(32,32,DXGI_FORMAT_R32_UINT,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST,24);
@@ -166,8 +172,8 @@ struct NativeRenderer {
     }
     std::vector<char> shader(const char* name) { std::ifstream f(directory/(std::string(name)+".cso"),std::ios::binary); std::vector<char> data((std::istreambuf_iterator<char>(f)),{}); if(data.empty()) throw std::runtime_error(std::string("Missing shader ")+name); return data; }
     ComPtr<ID3D12PipelineState> compute(const char* name) { auto code=shader(name); D3D12_COMPUTE_PIPELINE_STATE_DESC p{}; p.pRootSignature=root.Get(); p.CS={code.data(),code.size()}; ComPtr<ID3D12PipelineState> result; check(d.device->CreateComputePipelineState(&p,IID_PPV_ARGS(&result)),name); return result; }
-    ComPtr<ID3D12PipelineState> graphics(const char* pixel,bool blend,bool depthWrite,const char* vertex="vertexMain",bool wire=false) {
-        auto vs=shader(vertex),ps=shader(pixel); D3D12_GRAPHICS_PIPELINE_STATE_DESC p{}; p.pRootSignature=root.Get(); p.VS={vs.data(),vs.size()}; p.PS={ps.data(),ps.size()};
+    ComPtr<ID3D12PipelineState> graphicsFromBlobs(const char* pixel,const std::vector<char>& vs,const std::vector<char>& ps,bool blend,bool depthWrite,bool wire=false) {
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC p{}; p.pRootSignature=root.Get(); p.VS={vs.data(),vs.size()}; p.PS={ps.data(),ps.size()};
         p.RasterizerState.FillMode=wire?D3D12_FILL_MODE_WIREFRAME:D3D12_FILL_MODE_SOLID; p.RasterizerState.CullMode=D3D12_CULL_MODE_NONE; p.RasterizerState.FrontCounterClockwise=TRUE; p.RasterizerState.DepthClipEnable=TRUE;
         auto& b=p.BlendState.RenderTarget[0]; b.BlendEnable=blend; b.SrcBlend=D3D12_BLEND_SRC_ALPHA; b.DestBlend=D3D12_BLEND_INV_SRC_ALPHA; b.BlendOp=D3D12_BLEND_OP_ADD; b.SrcBlendAlpha=D3D12_BLEND_ONE; b.DestBlendAlpha=D3D12_BLEND_INV_SRC_ALPHA; b.BlendOpAlpha=D3D12_BLEND_OP_ADD; b.RenderTargetWriteMask=D3D12_COLOR_WRITE_ENABLE_ALL;
         p.DepthStencilState.DepthEnable=TRUE; p.DepthStencilState.DepthWriteMask=depthWrite?D3D12_DEPTH_WRITE_MASK_ALL:D3D12_DEPTH_WRITE_MASK_ZERO; p.DepthStencilState.DepthFunc=D3D12_COMPARISON_FUNC_LESS_EQUAL;
@@ -181,6 +187,34 @@ struct NativeRenderer {
             for(int i=1;i<3;i++){p.BlendState.RenderTarget[i]=b;p.BlendState.RenderTarget[i].BlendEnable=FALSE;}
         }
         ComPtr<ID3D12PipelineState> result; check(d.device->CreateGraphicsPipelineState(&p,IID_PPV_ARGS(&result)),pixel); return result;
+    }
+    ComPtr<ID3D12PipelineState> graphics(const char* pixel,bool blend,bool depthWrite,const char* vertex="vertexMain",bool wire=false) {
+        return graphicsFromBlobs(pixel,shader(vertex),shader(pixel),blend,depthWrite,wire);
+    }
+    // Hot-swap the character color PSOs with a runtime-compiled user shader stack.
+    // The vertex stage and all non-color passes stay unchanged. New PSOs are built
+    // into locals first so a failure leaves the current set intact. Runs between
+    // commands on the single-threaded loop, so swapping members is race-free.
+    void loadShader(const std::vector<uint8_t>& packet) {
+        if(packet.empty()){resetShader();return;}
+        Reader r{packet};uint32_t colorLen=r.u32();const uint8_t* colorData=r.take(colorLen);uint32_t aaLen=r.u32();const uint8_t* aaData=r.take(aaLen);
+        std::vector<char> color(colorData,colorData+colorLen),aa(aaData,aaData+aaLen),vs=shader("vertexMain");
+        auto c=graphicsFromBlobs("colorMain",vs,color,true,true);
+        auto ct=graphicsFromBlobs("colorMain",vs,color,true,false);
+        auto w=graphicsFromBlobs("colorMain",vs,color,true,true,true);
+        auto ac=graphicsFromBlobs("aaColorMain",vs,aa,true,true);
+        auto act=graphicsFromBlobs("aaColorMain",vs,aa,true,false);
+        colorPso=c;transparentPso=ct;wirePso=w;aaColorPso=ac;aaTransparentPso=act;userShaderActive=true;
+    }
+    void resetShader() {
+        colorPso=graphics("colorMain",true,true);transparentPso=graphics("colorMain",true,false);
+        wirePso=graphics("colorMain",true,true,"vertexMain",true);
+        aaColorPso=graphics("aaColorMain",true,true);aaTransparentPso=graphics("aaColorMain",true,false);
+        userShaderActive=false;
+    }
+    void setParams(const std::vector<uint8_t>& packet) {
+        void* mapped=nullptr;check(userParams->Map(0,nullptr,&mapped),"Map user params");
+        memcpy(mapped,packet.data(),std::min<size_t>(packet.size(),4096));userParams->Unmap(0,nullptr);
     }
     void loadModel(const std::vector<uint8_t>& packet) {
         Reader r{packet}; vertexCount=r.u32(); uint32_t triangleCount=r.u32(), materialCount=r.u32(), textureCount=r.u32();

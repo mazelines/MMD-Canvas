@@ -15,7 +15,7 @@ DDS의 BC1/BC2/BC3/BC6H/BC7 블록과 밉맵은 그대로 DX12에 업로드합�
 1. 현재 포즈·모프를 정점 버퍼에 반영하고 BLAS/TLAS를 갱신합니다. 포즈 변경 시 텍스처를 다시 전송하지 않습니다.
 2. 내부 해상도에서 깊이·법선·표면 위치·이전 포즈 위치 프리패스를 만듭니다. DLSS Quality·Balanced에서는 출력보다 작고 DLAA·MSAA에서는 출력과 같습니다.
 3. DXR 그림자를 저광선 패스에서 계산하고 모션 재투영·시간 누적·공간 필터로 복원합니다. 별도로 packed mip chain과 CORTAO 1.0.3 원본 HLSL/32-ray LUT로 AO를 계산합니다.
-4. Lambert·Toon 셰이더에서 방향광에는 DXR 그림자, 간접 확산광에는 `min(materialAO, CORTAO)`를 적용합니다. 발광은 보존합니다.
+4. Lambert·Toon 셰이더에서 방향광에는 DXR 그림자, 간접 확산광에는 `min(materialAO, CORTAO)`를 적용합니다. 발광은 보존합니다. 이 고정 베이스 위에 사용자가 작성한 void 함수 스택을 쌓을 수 있습니다. [셰이더 스택 에디터](shader-stack.md).
 5. RGBA16F에서 투명도와 Toon 헐을 합성합니다. DLAA·DLSS에서는 단일 샘플 색상·깊이·모션 벡터를 NGX로 복원하고, MSAA에서는 4배 샘플을 resolve합니다. [DLAA·DLSS 구조와 제한](dlss.md).
 6. EV100 → GT7 SDR → sRGB 순으로 출력합니다. AO Debug View는 노출·톤매핑을 우회합니다. 샤픈이 켜져 있으면 sRGB 합성본을 중간 텍스처에 기록한 뒤 NIS NVSharpen 패스가 최종 출력을 만듭니다. [샤픈 구조와 제한](dlss.md).
 
