@@ -39,7 +39,7 @@
     "three": "^0.187.0"
   },
   "devDependencies": {
-    "@electron/asar": "^3.4.1",
+    "@electron/asar": "^4.3.2",
     "electron": "45.3.0",
     "electron-builder": "26.18.0"
   }
