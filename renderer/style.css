@@ -234,6 +234,27 @@ aside { background: var(--panel); min-height: 0; display: flex; flex-direction: 
 .morph output { color: var(--muted); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
 .morph input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
 
+/* ---------- shader stack editor ---------- */
+#shader-stack { list-style: none; margin: 0 0 6px; padding: 0; max-height: 200px; overflow-y: auto; }
+#shader-stack li { display: flex; align-items: center; gap: 4px; padding: 3px 4px; border-radius: 5px; }
+#shader-stack li.active { background: #2d4668; }
+#shader-stack li input[type="checkbox"] { accent-color: var(--accent); margin: 0; }
+#shader-stack .shader-select { flex: 1; text-align: left; background: transparent; border: 1px solid transparent; color: var(--text); padding: 2px 6px; border-radius: 4px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: Consolas, monospace; font-size: 12px; }
+#shader-stack li.active .shader-select { color: #dcecff; }
+#shader-stack .link { padding: 0 4px; font-size: 12px; }
+#shader-editor-host { user-select: text; }
+#shader-editor-host .CodeMirror { height: 240px; border: 1px solid var(--line); border-radius: 6px; font-family: Consolas, monospace; font-size: 12px; }
+.shader-error { background: #2a1a1c; border: 1px solid #ba6666; color: #ffb4b4; border-radius: 6px; padding: 8px 10px; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 140px; overflow-y: auto; user-select: text; margin: 6px 0 0; }
+.shader-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.shader-actions .muted { font-size: 11px; }
+#shader-properties { display: flex; flex-direction: column; gap: 6px; }
+.shader-prop-row { display: grid; grid-template-columns: 96px 1fr auto; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.shader-prop-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shader-prop-row input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
+.shader-prop-row input[type="number"], .shader-prop-row input[type="text"] { width: 100%; }
+.shader-prop-row input[type="color"] { width: 40px; height: 24px; padding: 0; border: 1px solid var(--line); background: #12141a; }
+.shader-prop-row output { color: var(--muted); font-size: 11px; min-width: 30px; text-align: right; font-variant-numeric: tabular-nums; }
+
 /* ---------- status bar ---------- */
 #statusbar { flex: none; padding: 4px 10px; background: var(--panel); border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #statusbar.error { color: var(--error); }

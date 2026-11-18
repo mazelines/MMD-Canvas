@@ -1,6 +1,6 @@
 {
   "name": "mmd-converter",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "PMX(MMD) -> FBX / USD converter with 3D file viewer & browser",
   "type": "module",
   "main": "electron/main.js",
@@ -18,6 +18,8 @@
     "test:lifetime": "electron tests/dx12-lifetime-smoke.cjs",
     "test:zoom": "electron tests/dx12-zoom-profile.cjs",
     "test:dlss": "electron tests/dx12-aa-smoke.cjs",
+    "test:shader-stack": "electron tests/dx12-shader-stack-smoke.cjs",
+    "test:shader-ui": "electron tests/shader-stack-ui-smoke.cjs",
     "test:grid": "electron tests/dx12-grid-smoke.cjs",
     "test:open": "electron tests/open-file-smoke.cjs",
     "test:first-run": "electron tests/first-run-smoke.cjs",

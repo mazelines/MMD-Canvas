@@ -210,7 +210,12 @@ float visibilityAt(int2 pixel) {
     }
     return saturate(1 - (1 - (weight > 0 ? total / weight : 1)) * ao.x);
 }
-float4 colorMain(Varying v, bool front : SV_IsFrontFace, uint primitive : SV_PrimitiveID) : SV_Target {
+#include "shading-context.hlsl"
+// Fixed base shading: reproduces the original character lighting exactly and
+// populates the ShadingContext for user stack layers. The base result is
+// ctx.color; populating the other fields does not change it (unused fields are
+// optimized away when the user stack is empty).
+void baseShading(Varying v, bool front, uint primitive, inout ShadingContext ctx) {
     Material m = materials[materialId]; cullSide(m, front); float2 uv = surfaceUv(m, v.uv);
     float alpha = surfaceAlpha(m, uv); clip(alpha - max(m.options.x, 0.001));
     float3 n = surfaceNormal(v, front,m);
@@ -236,7 +241,22 @@ float4 colorMain(Varying v, bool front : SV_IsFrontFace, uint primitive : SV_Pri
     float3 albedo = m.color.rgb * (m.mapFlags.z>0?decodeSRGB(base):base);
     float3 emission = m.emission.rgb * (m.mapFlags.w>0?decodeSRGB(emissive):emissive);
     float3 lit = albedo * (direct * sun.w + fill * min(materialAO, screenAO)) / 3.141592653589793 + emission;
-    return float4(lit / 100.0, alpha);
+    ctx.worldPos = v.world; ctx.normal = n; ctx.geoNormal = n; ctx.uv = uv;
+    ctx.viewDir = normalize(-mul(transpose((float3x3)view),float3(view[0][3],view[1][3],view[2][3])) - v.world);
+    ctx.depth = v.depth; ctx.pixel = v.position.xy; ctx.front = front ? 1.0 : -1.0;
+    ctx.albedo = albedo; ctx.emission = emission; ctx.alpha = alpha; ctx.materialColor = m.color.rgb;
+    ctx.ndl = ndl; ctx.direct = direct; ctx.shade = shade; ctx.fill = fill; ctx.ao = min(materialAO, screenAO);
+    ctx.sunDir = normalize(sun.xyz); ctx.sunLux = sun.w; ctx.skyColor = sky.rgb; ctx.groundColor = ground.rgb;
+    ctx.color = lit;
+}
+// User stack injection point. The build-time default is empty (no layers); the
+// runtime generator replaces this with sequential calls to user void functions.
+void runUserStack(inout ShadingContext ctx) { }
+float4 colorMain(Varying v, bool front : SV_IsFrontFace, uint primitive : SV_PrimitiveID) : SV_Target {
+    ShadingContext ctx;
+    baseShading(v, front, primitive, ctx);
+    runUserStack(ctx);
+    return float4(ctx.color / 100.0, ctx.alpha);
 }
 
 #define CORTAO_HLSL 1

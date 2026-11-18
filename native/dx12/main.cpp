@@ -107,6 +107,13 @@ int main(int argc, char** argv) {
                 else if(header[0]==2)std::cout<<renderer.render(payload)<<std::endl;
                 else if(header[0]==3){Reader r{payload};renderer.release(r.u32());}
                 else if(header[0]==5){renderer.updatePose(payload);std::cout<<"{\"type\":\"pose\"}"<<std::endl;}
+                else if(header[0]==6){
+                    // A bad user shader must not kill the renderer: report the error
+                    // as a JSON ack and keep the previous PSO set.
+                    try{renderer.loadShader(payload);std::cout<<"{\"type\":\"shader\",\"ok\":true,\"active\":"<<(renderer.userShaderActive?"true":"false")<<"}"<<std::endl;}
+                    catch(const std::exception&e){std::cout<<"{\"type\":\"shader\",\"ok\":false,\"error\":"<<::quoted(e.what())<<"}"<<std::endl;}
+                }
+                else if(header[0]==7){renderer.setParams(payload);std::cout<<"{\"type\":\"params\"}"<<std::endl;}
                 else if(header[0]==4)break;
                 else if(header[0]!=3)throw std::runtime_error("Unknown native command");
             }

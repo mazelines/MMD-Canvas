@@ -8,7 +8,8 @@ function verifyPackage(archive, projectDir = path.resolve(__dirname, '..')) {
   const required = ['package.json', 'electron/main.js', 'electron/preload.cjs', 'electron/gpu-presenter.cjs',
     'renderer/index.html', 'renderer/app.js', 'renderer/viewer.js',
     'renderer/cortao.js', 'electron/dx12.js', 'renderer/dx12.js', 'renderer/native-textures.js',
-    'node_modules/three/build/three.core.js', 'src/core/ambient-occlusion.js', 'licenses/CORTAO-MIT.txt', 'licenses/NVIDIA-DLSS.txt', 'licenses/NVIDIA-NIS.txt'];
+    'node_modules/three/build/three.core.js', 'src/core/ambient-occlusion.js', 'licenses/CORTAO-MIT.txt', 'licenses/NVIDIA-DLSS.txt', 'licenses/NVIDIA-NIS.txt', 'licenses/DXC-SDK.txt',
+    'native/dx12/viewport.hlsl', 'native/dx12/shading-context.hlsl'];
   // Check the complete runtime trees, including lazy loaders, their transitive
   // helpers and WASM assets. Checking only startup imports misses format failures.
   for (const directory of ['node_modules/three/examples/jsm']) {
@@ -38,7 +39,7 @@ module.exports = async ({ appOutDir, packager }) => {
   const resources = packager.getResourcesDir(appOutDir);
   verifyPackage(path.join(resources, 'app.asar'), packager.projectDir);
   verifyExample(path.join(packager.projectDir, 'Example'), path.join(resources, '..', 'Example'));
-  for (const file of ['mmd-dx12.exe', 'nvngx_dlss.dll', 'aaColorMain.cso', 'aaOutlineMain.cso', 'aaPrepareMain.cso', 'vertexMain.cso', 'outlineVertex.cso', 'outlineMain.cso', 'normalMain.cso', 'colorMain.cso', 'packMain.cso', 'mipMain.cso', 'cortaoMain.cso', 'outputMain.cso', 'shadowTraceMain.cso', 'shadowTemporalMain.cso', 'shadowSpatialMain.cso', 'shadowSpatialFinalMain.cso', 'nis-sharpen.cso', '32x32x24x32_R32_UINT.bin']) {
+  for (const file of ['mmd-dx12.exe', 'nvngx_dlss.dll', 'aaColorMain.cso', 'aaOutlineMain.cso', 'aaPrepareMain.cso', 'vertexMain.cso', 'outlineVertex.cso', 'outlineMain.cso', 'normalMain.cso', 'colorMain.cso', 'packMain.cso', 'mipMain.cso', 'cortaoMain.cso', 'outputMain.cso', 'shadowTraceMain.cso', 'shadowTemporalMain.cso', 'shadowSpatialMain.cso', 'shadowSpatialFinalMain.cso', 'nis-sharpen.cso', 'dxc.exe', 'dxcompiler.dll', 'dxil.dll', '32x32x24x32_R32_UINT.bin']) {
     const packaged=path.join(resources,'..','native','dx12',file);
     assert.ok(fs.existsSync(packaged),`Packaged DX12 runtime missing: ${file}`);
     assert.ok(fs.readFileSync(packaged).equals(fs.readFileSync(path.join(packager.projectDir,'out','dx12',file))),`Packaged DX12 runtime differs: ${file}`);

@@ -60,6 +60,17 @@ export function validateWorkspace(value) {
         near: number(camera.near, 'camera.near', 1e-12, 1e15), far: number(camera.far, 'camera.far', 1e-12, 1e15),
         maxDistance: number(camera.maxDistance, 'camera.maxDistance', 1e-12, 1e15),
       },
+      shaderStack: v.shaderStack === undefined ? [] : list(v.shaderStack, 'shaderStack', (item) => {
+        const l = object(item, 'shaderStack.layer');
+        const rawParams = l.params === undefined ? {} : object(l.params, 'shaderStack.params');
+        const params = {};
+        for (const [key, val] of Object.entries(rawParams).slice(0, 256)) {
+          if (typeof val === 'number' && Number.isFinite(val)) params[key] = val;
+          else if (Array.isArray(val) && val.length <= 4 && val.every((n) => typeof n === 'number' && Number.isFinite(n))) params[key] = val;
+        }
+        return { id: string(l.id, 'shaderStack.id', 64), name: string(l.name, 'shaderStack.name', 128),
+          code: string(l.code, 'shaderStack.code', 32768), enabled: bool(l.enabled, 'shaderStack.enabled'), params };
+      }),
     },
     conversion: {
       mode: choice(c.mode, 'conversion.mode', ['single', 'batch']), format: choice(c.format, 'conversion.format', ['fbx', 'usda', 'usdz']),
@@ -68,7 +79,7 @@ export function validateWorkspace(value) {
       ...Object.fromEntries(['morphs', 'copyTextures', 'asciiNames', 'recursive'].map((key) => [key, bool(c[key], key)])),
     },
     inspector: {
-      tab: choice(i.tab, 'inspector.tab', ['overview', 'materials']),
+      tab: choice(i.tab, 'inspector.tab', ['overview', 'materials', 'shader']),
       selectedMaterial: Number.isInteger(i.selectedMaterial) ? number(i.selectedMaterial, 'selectedMaterial', 0, 100000) : fail('selectedMaterial'),
       filter: string(i.filter, 'material filter', 4096),
       soloVisibility: i.soloVisibility === null ? null : list(i.soloVisibility, 'soloVisibility', (v) => bool(v, 'soloVisibility')),

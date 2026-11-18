@@ -10,6 +10,12 @@ A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
 
+## v0.5.7: shader stack editor
+
+The new **Shader Stack** inspector tab lets you extend a loaded PMX character's surface shading by stacking your own HLSL functions. It is code-editor based, not a node graph: the built-in lighting stays a fixed base and you add `void fn(inout ShadingContext ctx)` layers in order. Parameters declared with `//@property` annotations auto-generate UI controls from the stack, and value changes apply without recompiling.
+
+Functions compile at runtime with the bundled DXC and hot-swap the native color PSOs; the empty default stack is bit-identical to the previous shading. Ships RimLight, Fresnel, ColorGrade and ToonRamp examples plus workspace save/restore. The installer bundles DXC (Windows SDK redistributable) and CodeMirror (MIT). [Structure and syntax](shader-stack.md) · [0.5.7 release notes](release-notes/v0.5.7.md).
+
 ## v0.5.6: grid quality and NVIDIA sharpening
 
 Fix broken and flickering grid lines at shallow camera angles. Filter lines using their projected footprint at output resolution, fade densely spaced distant lines, and smooth the grid boundary. The grid starts disabled, including in the bundled first-launch workspace. Transparent materials now have yellow checkboxes in the material list.

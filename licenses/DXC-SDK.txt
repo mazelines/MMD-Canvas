@@ -1,0 +1,23 @@
+DirectX Shader Compiler (DXC) — Windows SDK redistributable components
+
+This application bundles the following unmodified Microsoft DirectX Shader
+Compiler binaries to compile user-authored shader stacks at runtime:
+
+  dxc.exe
+  dxcompiler.dll
+  dxil.dll
+
+They are taken from the Windows SDK "Redist/D3D/x64" redistributable folder
+(also present in the SDK bin/<version>/x64 toolchain folder) and are governed
+by the Microsoft Windows SDK license, not by this project's MIT license.
+
+Source: Microsoft Windows SDK — https://developer.microsoft.com/windows/downloads/windows-sdk/
+DXC project: https://github.com/microsoft/DirectXShaderCompiler (MIT)
+
+The Windows SDK license permits redistribution of the object code listed in
+its REDIST.TXT files ("Distributable Code"), subject to its terms, including:
+the application adds significant primary functionality (here, user shader
+authoring/compilation), and downstream license terms are at least as
+protective as the SDK agreement. The binaries are redistributed unmodified.
+
+Copyright (c) Microsoft Corporation. All rights reserved.

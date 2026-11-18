@@ -1,6 +1,7 @@
 import { t, setLanguage, getLanguage, formatNumber, translateStatic } from '../src/i18n/index.js';
 import { Viewer, VIEWABLE } from './viewer.js';
 import { MaterialPanel } from './material-panel.js';
+import { ShaderStackPanel } from './shader-stack-panel.js';
 import { captureWorkspace, restoreWorkspaceState } from './workspace-state.js';
 import { DEFAULT_LIGHT_LUX, DEFAULT_AMBIENT_LUX, DEFAULT_EV100, clampLightLux, legacyLightToLux } from '../src/core/lighting.js';
 import { DEFAULT_CORTAO } from '../src/core/ambient-occlusion.js';
@@ -39,6 +40,8 @@ const applySharpen=(value,save=true)=>{
 $('viewport-sharpen').addEventListener('input',()=>applySharpen($('viewport-sharpen').value));
 applySharpen(viewer.dx12.sharpen,false);
 const materialPanel = new MaterialPanel(viewer);
+const shaderPanel = new ShaderStackPanel(viewer);
+viewer.shaderPanel = shaderPanel;
 const applyRenderMode = (mode, save = false) => {
   viewer.setRenderMode(mode);
   $('toon-settings').hidden = viewer.renderMode !== 'toon';

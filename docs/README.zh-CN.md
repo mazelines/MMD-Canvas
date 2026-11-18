@@ -10,6 +10,12 @@
 
 [下载](https://github.com/mazelines/MMD-Canvas/releases) · [CI 结果](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [发布指南（韩语）](releases.md)
 
+## v0.5.7：着色器堆栈编辑器
+
+新增**着色器堆栈**检查器标签页，可通过堆叠自己编写的 HLSL 函数来扩展已加载 PMX 角色的表面着色。它基于代码编辑而非节点图：内置光照保持为固定基础，你按顺序添加 `void fn(inout ShadingContext ctx)` 层。用 `//@property` 注释声明的参数会根据堆栈内容自动生成 UI 控件，修改数值无需重新编译。
+
+函数使用随附的 DXC 在运行时编译并热替换原生 color PSO；空的默认堆栈与之前的着色逐位一致。附带 RimLight、Fresnel、ColorGrade、ToonRamp 示例以及工作区保存/恢复。安装包包含 DXC（Windows SDK 可再发行组件）和 CodeMirror（MIT）。[结构与语法](shader-stack.md) · [0.5.7 发布说明](release-notes/v0.5.7.md)。
+
 ## v0.5.6：网格质量与 NVIDIA 锐化
 
 修复低视角下网格线断裂、闪烁的问题。根据地面的投影大小，在输出分辨率下过滤线条，对远处密集的线条进行淡出，并平滑网格边界。网格默认关闭，首次启动的内置画布也采用该设置。半透明材质在材质列表中使用黄色复选框。

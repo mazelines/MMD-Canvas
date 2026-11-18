@@ -5,6 +5,10 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' app:; img-src 'self' app: blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self' app: 'unsafe-inline'; connect-src 'self' app: blob: data:; worker-src 'self' blob:">
   <title>MMD Canvas</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="vendor/codemirror/codemirror.min.css">
+  <link rel="stylesheet" href="vendor/codemirror/theme/material-darker.min.css">
+  <script src="vendor/codemirror/codemirror.min.js"></script>
+  <script src="vendor/codemirror/mode/clike/clike.min.js"></script>
   <script type="importmap">
     {
       "imports": {
@@ -129,6 +133,7 @@
       <div class="inspector-tabs" role="tablist" aria-label="모델 검사">
         <button class="inspector-tab" id="tab-overview" role="tab" aria-selected="true" aria-controls="inspector-overview">모델 정보</button>
         <button class="inspector-tab" id="tab-materials" role="tab" tabindex="-1" aria-selected="false" aria-controls="inspector-materials">머티리얼 <span id="material-tab-count">0</span></button>
+        <button class="inspector-tab" id="tab-shader" role="tab" tabindex="-1" aria-selected="false" aria-controls="inspector-shader">셰이더 스택</button>
       </div>
       <div id="inspector-overview" role="tabpanel" aria-labelledby="tab-overview">
       <section class="panel">
@@ -156,6 +161,23 @@
           <div class="material-note">표시 설정은 현재 미리보기에만 적용됩니다.</div>
         </div>
         <div id="material-detail"></div>
+      </div>
+      <div id="inspector-shader" role="tabpanel" aria-labelledby="tab-shader" hidden>
+        <section class="panel">
+          <h2>함수 스택 <button id="shader-add" class="link">함수 추가</button><button id="shader-reset" class="link">기본값</button></h2>
+          <ul id="shader-stack" aria-label="셰이더 함수 스택"></ul>
+          <div class="material-note">캐릭터 표면 셰이딩 위에 void 함수를 순서대로 쌓아 결과를 만듭니다.</div>
+        </section>
+        <section class="panel">
+          <h2>코드 <span id="shader-name" class="count"></span></h2>
+          <div id="shader-editor-host"></div>
+          <pre id="shader-error" class="shader-error" hidden></pre>
+          <div class="shader-actions"><button id="shader-apply" class="primary">적용</button><span id="shader-status" class="muted"></span></div>
+        </section>
+        <section class="panel">
+          <h2>프로퍼티</h2>
+          <div id="shader-properties"></div>
+        </section>
       </div>
     </aside>
   </main>
