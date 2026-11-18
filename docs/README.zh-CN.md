@@ -10,6 +10,10 @@
 
 [下载](https://github.com/mazelines/MMD-Canvas/releases) · [CI 结果](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [发布指南（韩语）](releases.md)
 
+## v0.5.9：着色器堆栈恢复加固
+
+修复打开带着色器堆栈的工作区时，DX12 渲染器尚未就绪或编译错误不再中断工作区恢复。堆栈状态保留在主进程并在渲染器启动时应用。解决 v0.5.8 首次启动工作区路径报告回归。[0.5.9 发布说明](release-notes/v0.5.9.md)。
+
 ## v0.5.8：着色器堆栈编辑器独立窗口
 
 将着色器堆栈编辑器从检查器标签页移至**独立的编辑窗口**，通过**视图 → 着色器堆栈编辑器…**（Ctrl+Shift+K）打开。关闭窗口后堆栈状态保留，重新打开时恢复。窗口无预览，应用结果显示在主视口。主进程管理堆栈状态并串行化渲染通道，使着色器加载不与进行中的渲染冲突。[结构与语法](shader-stack.md) · [0.5.8 发布说明](release-notes/v0.5.8.md)。

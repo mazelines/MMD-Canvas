@@ -754,7 +754,9 @@ async function openWorkspace(filePath = null, { remember = true } = {}) {
     state.restoring = true; // controls are driven through their own events; keep those out of the saved defaults
     try { changed = restoreWorkspaceState(data, viewer, state, materialPanel, applyRenderMode, applyOutline); }
     finally { state.restoring = false; reportMenuState(); }
-    await api.shaderStackApply(data.viewport.shaderStack || []);
+    // Restore the shader stack best-effort: a compile error or a not-yet-ready
+    // renderer must not abort the workspace open (state is kept in main).
+    try { await api.shaderStackApply(data.viewport.shaderStack || []); } catch { /* kept in main */ }
     $('convert-dialog').close(); $('convert-result').hidden = true; state.lastOutput = null;
     state.workspacePath = result.filePath;
     if (remember) localStorage.setItem('lastWorkspace', result.filePath);

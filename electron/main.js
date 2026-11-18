@@ -213,7 +213,12 @@ const handle = (channel, fn) => ipcMain.handle(channel, async (_e, ...args) => {
   try { return { ok: true, value: await fn(...args) }; }
   catch (e) { return { ok: false, error: e.message || String(e) }; }
 });
-handle('dx12:start', () => dx12.start());
+handle('dx12:start', async () => {
+  const caps = await dx12.start();
+  // Apply any stack restored before the renderer was ready.
+  try { await loadShaderStack(); notifyShaderApplied(); } catch { /* best-effort */ }
+  return caps;
+});
 handle('dx12:model', data => dx12.model(data));
 handle('dx12:pose', data => dx12.pose(data));
 handle('dx12:render', data => dx12.render(data));
@@ -226,29 +231,34 @@ handle('dx12:params', data => dx12.setParams(data));
 handle('dx12:stop', () => dx12.stop());
 
 // Shader stack editor window: main owns the state, compiles, hot-swap, and
-// notifies the main viewport to re-render. Apply serializes against the render
-// channel via pause/resume; parameter uploads are fire-and-forget.
+// notifies the main viewport to re-render. The host mutex serializes shader loads
+// against renders; parameter uploads are fire-and-forget.
 handle('shader-stack:get', () => shaderStack);
+// Best-effort compile + hot-swap of the current stack into the running renderer.
+// Skips silently if the renderer is not up yet (applied later on dx12:start).
+async function loadShaderStack() {
+  if (!dx12.child) return;
+  const active = shaderStack.filter(l => l.enabled !== false);
+  if (!active.length) { await dx12.shader(null); return; }
+  const values = Object.fromEntries(shaderStack.map(l => [l.id, l.params || {}]));
+  const blobs = await compileShaderStack(shaderStack);
+  await dx12.shader(blobs.color, blobs.aa);
+  dx12.setParams(packParams(shaderStack, values).buffer);
+}
 ipcMain.handle('shader-stack:apply', async (event, layers) => {
-  try {
-    const next = Array.isArray(layers) ? layers : [];
-    const active = next.filter(l => l.enabled !== false);
-    const values = Object.fromEntries(next.map(l => [l.id, l.params || {}]));
-    let result;
-    if (!active.length) result = await dx12.shader(null);
-    else {
-      const blobs = await compileShaderStack(next);
-      result = await dx12.shader(blobs.color, blobs.aa);
-      dx12.setParams(packParams(next, values).buffer);
-    }
-    shaderStack = next;
-    notifyShaderApplied();
-    // Refresh the editor only when the change came from elsewhere (e.g. workspace
-    // restore), not from the editor window's own apply.
-    const fromEditor = shaderWin && !shaderWin.isDestroyed() && event.sender === shaderWin.webContents;
-    if (!fromEditor && shaderWin && !shaderWin.isDestroyed()) shaderWin.webContents.send('shader-stack:updated', shaderStack);
-    return { ok: true, value: result };
-  } catch (e) { return { ok: false, error: e.message || String(e) }; }
+  const next = Array.isArray(layers) ? layers : [];
+  // Store state first so a workspace restore persists even if the renderer is not
+  // ready yet; the load itself is best-effort and must not abort the caller.
+  shaderStack = next;
+  let loadError = null;
+  try { await loadShaderStack(); } catch (e) { loadError = e.message || String(e); }
+  notifyShaderApplied();
+  // Refresh the editor only when the change came from elsewhere (e.g. workspace
+  // restore), not from the editor window's own apply.
+  const fromEditor = shaderWin && !shaderWin.isDestroyed() && event.sender === shaderWin.webContents;
+  if (!fromEditor && shaderWin && !shaderWin.isDestroyed()) shaderWin.webContents.send('shader-stack:updated', shaderStack);
+  if (loadError) return { ok: false, error: loadError };
+  return { ok: true, value: { active: next.some(l => l.enabled !== false) } };
 });
 handle('shader-stack:params', values => {
   for (const l of shaderStack) if (values && values[l.id]) l.params = { ...(l.params || {}), ...values[l.id] };
