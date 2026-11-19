@@ -22,12 +22,12 @@ const MODULE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 
 const RUN_STACK = 'void runUserStack(inout ShadingContext ctx) { }';
 
-export function generateStackSource(baseSource, layers) {
-  const { layers: parsed } = parseStack(layers);
-  // Inject each active layer's property declarations (reading userParams slots)
-  // at the top of its function body, then call the layers in stack order.
+export function generateStackSource(baseSource, layers, stride = 1) {
+  const { layers: parsed } = parseStack(layers, 0);
+  // Inject each active layer's property declarations (reading per-material
+  // userParams slots: materialId*stride + localSlot), then call layers in order.
   const functions = parsed
-    .map((l, i) => (l.enabled && l.name ? injectDeclarations(layers[i].code, l) : null))
+    .map((l, i) => (l.enabled && l.name ? injectDeclarations(layers[i].code, l, stride) : null))
     .filter(Boolean).join('\n\n');
   const calls = parsed.filter(l => l.enabled && l.name).map(l => `    ${l.name}(ctx);`).join('\n');
   const body = `void runUserStack(inout ShadingContext ctx) {\n${calls}\n}`;
@@ -62,12 +62,12 @@ function runDxc(dxcDir, args, cwd) {
 
 // Returns { color: Buffer, aa: Buffer } DXIL blobs for colorMain / aaColorMain.
 // Throws with the compiler diagnostic on failure.
-export async function compileShaderStack(layers) {
+export async function compileShaderStack(layers, stride = 1) {
   const { hlslDir, cortaoDir, dxcDir } = resolvePaths();
   const dxc = path.join(dxcDir, 'dxc.exe');
   if (!fs.existsSync(dxc)) throw new Error('런타임 셰이더 컴파일러(dxc.exe)가 없습니다. npm run build:dx12로 빌드해 주세요.');
   const baseSource = fs.readFileSync(path.join(hlslDir, 'viewport.hlsl'), 'utf8');
-  const generated = generateStackSource(baseSource, layers);
+  const generated = generateStackSource(baseSource, layers, stride);
 
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'mmd-shader-'));
   try {

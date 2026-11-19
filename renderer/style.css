@@ -267,6 +267,14 @@ body.shader-window { overflow: hidden; user-select: none; }
 .shader-right { overflow-y: auto; }
 .shader-right .panel { border-bottom: 1px solid var(--line); }
 .shader-right #shader-stack { max-height: none; }
+.shader-select-row { display: grid; grid-template-columns: 56px 1fr; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.shader-select-row select { width: 100%; background: #12141a; color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 4px; }
+#shader-library { list-style: none; margin: 0; padding: 0; max-height: 160px; overflow-y: auto; }
+#shader-library li { display: flex; align-items: center; gap: 4px; padding: 3px 4px; border-radius: 5px; }
+#shader-library li.active { background: #2d4668; }
+#shader-library .shader-select { flex: 1; text-align: left; background: transparent; border: 1px solid transparent; color: var(--text); padding: 2px 6px; border-radius: 4px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+#shader-library li.active .shader-select { color: #dcecff; }
+#shader-library .link { padding: 0 4px; font-size: 12px; }
 #shader-stack li { cursor: grab; }
 #shader-stack li.dragging { opacity: .5; }
 #shader-stack li.drop-above { box-shadow: 0 -2px 0 var(--accent); }

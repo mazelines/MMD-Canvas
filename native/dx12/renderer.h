@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <unordered_map>
 #include "dlss.h"
 #include "NIS_Config.h"
 
@@ -26,6 +27,12 @@ struct NativeRenderer {
     ComPtr<ID3D12PipelineState> normalPso, colorPso, transparentPso, outlinePso, wirePso, packPso, mipPso, aoPso, outputPso, sharpenPso;
     ComPtr<ID3D12PipelineState> shadowTracePso, shadowTemporalPso, shadowSpatialPso, shadowFinalPso;
     ComPtr<ID3D12PipelineState> aaColorPso, aaTransparentPso, aaOutlinePso, aaPreparePso;
+    // Per-material shader stacks: a stackId -> PSO-set library plus a per-material
+    // stackId assignment. stackId 0 uses the base (global) color PSOs above.
+    struct PsoSet { ComPtr<ID3D12PipelineState> color, transparent, wire, aaColor, aaTransparent; };
+    std::unordered_map<uint32_t, PsoSet> stackPsos;
+    std::unordered_map<uint32_t, bool> stackOutline;
+    std::vector<uint32_t> materialStackIds;
     ComPtr<ID3D12Resource> aaOutput, aaMotion, aaDepth, aaExposure, composite, nisConfig, userParams;
     ComPtr<ID3D12Resource> vertexBuffer, triangleBuffer, materialBuffer, indexBuffer, blas, tlas, scratch, instances, constants;
     ComPtr<ID3D12Resource> normal, depth, hdr, hdrMs, depthMs, packedBuffer, aoTexture, sharedOutput, lut;
@@ -103,8 +110,8 @@ struct NativeRenderer {
         // User shader-stack parameters: persistent upload-heap structured buffer at
         // t149 (slot 149). The runtime color shader reads float4 property slots from
         // it; the default shader never reads t149, so binding it always is harmless.
-        userParams = buffer(4096,D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
-        structured(userParams.Get(),149,256,16);
+        userParams = buffer(65536,D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
+        structured(userParams.Get(),149,4096,16);
         std::ifstream in(directory / "32x32x24x32_R32_UINT.bin",std::ios::binary);
         std::vector<uint8_t> table((std::istreambuf_iterator<char>(in)),{}); if(table.size()!=98304) throw std::runtime_error("CORTAO lookup table is missing");
         d.begin(); lut = texture(32,32,DXGI_FORMAT_R32_UINT,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST,24);
@@ -195,16 +202,21 @@ struct NativeRenderer {
     // The vertex stage and all non-color passes stay unchanged. New PSOs are built
     // into locals first so a failure leaves the current set intact. Runs between
     // commands on the single-threaded loop, so swapping members is race-free.
+    PsoSet buildPsoSet(const std::vector<char>& color,const std::vector<char>& aa,const std::vector<char>& vs) {
+        PsoSet s;
+        s.color=graphicsFromBlobs("colorMain",vs,color,true,true);
+        s.transparent=graphicsFromBlobs("colorMain",vs,color,true,false);
+        s.wire=graphicsFromBlobs("colorMain",vs,color,true,true,true);
+        s.aaColor=graphicsFromBlobs("aaColorMain",vs,aa,true,true);
+        s.aaTransparent=graphicsFromBlobs("aaColorMain",vs,aa,true,false);
+        return s;
+    }
     void loadShader(const std::vector<uint8_t>& packet) {
         if(packet.empty()){resetShader();return;}
         Reader r{packet};uint32_t colorLen=r.u32();const uint8_t* colorData=r.take(colorLen);uint32_t aaLen=r.u32();const uint8_t* aaData=r.take(aaLen);
         std::vector<char> color(colorData,colorData+colorLen),aa(aaData,aaData+aaLen),vs=shader("vertexMain");
-        auto c=graphicsFromBlobs("colorMain",vs,color,true,true);
-        auto ct=graphicsFromBlobs("colorMain",vs,color,true,false);
-        auto w=graphicsFromBlobs("colorMain",vs,color,true,true,true);
-        auto ac=graphicsFromBlobs("aaColorMain",vs,aa,true,true);
-        auto act=graphicsFromBlobs("aaColorMain",vs,aa,true,false);
-        colorPso=c;transparentPso=ct;wirePso=w;aaColorPso=ac;aaTransparentPso=act;userShaderActive=true;
+        PsoSet s=buildPsoSet(color,aa,vs);
+        colorPso=s.color;transparentPso=s.transparent;wirePso=s.wire;aaColorPso=s.aaColor;aaTransparentPso=s.aaTransparent;userShaderActive=true;
         // The surface shading changed: discard temporal history so DLAA converges
         // to the new result instead of blending it away against stale frames.
         aaHistoryValid=false;aaStableFrames=0;
@@ -215,9 +227,32 @@ struct NativeRenderer {
         aaColorPso=graphics("aaColorMain",true,true);aaTransparentPso=graphics("aaColorMain",true,false);
         userShaderActive=false;aaHistoryValid=false;aaStableFrames=0;
     }
+    // Load a library of per-material shader stacks (stackId -> PSO set). Built into
+    // a local map first so a compile failure leaves the current library intact.
+    void loadShaderLibrary(const std::vector<uint8_t>& packet) {
+        Reader r{packet};uint32_t count=r.u32();
+        std::unordered_map<uint32_t,PsoSet> next;
+        std::unordered_map<uint32_t,bool> nextOutline;
+        std::vector<char> vs=shader("vertexMain");
+        for(uint32_t i=0;i<count;i++){
+            uint32_t stackId=r.u32();uint32_t outline=r.u32();uint32_t colorLen=r.u32();const uint8_t* cd=r.take(colorLen);uint32_t aaLen=r.u32();const uint8_t* ad=r.take(aaLen);
+            if(!stackId)throw std::runtime_error("stackId 0 is reserved for the base shader");
+            std::vector<char> color(cd,cd+colorLen),aa(ad,ad+aaLen);
+            next.emplace(stackId,buildPsoSet(color,aa,vs));
+            nextOutline[stackId]=outline!=0;
+        }
+        stackPsos=std::move(next);stackOutline=std::move(nextOutline);
+        aaHistoryValid=false;aaStableFrames=0;
+    }
+    // Per-material stackId assignment (indexed by native materialId; 0 = base).
+    void setMaterialStacks(const std::vector<uint8_t>& packet) {
+        Reader r{packet};uint32_t count=r.u32();
+        materialStackIds.resize(count);
+        for(uint32_t i=0;i<count;i++)materialStackIds[i]=r.u32();
+    }
     void setParams(const std::vector<uint8_t>& packet) {
         void* mapped=nullptr;check(userParams->Map(0,nullptr,&mapped),"Map user params");
-        memcpy(mapped,packet.data(),std::min<size_t>(packet.size(),4096));userParams->Unmap(0,nullptr);
+        memcpy(mapped,packet.data(),std::min<size_t>(packet.size(),65536));userParams->Unmap(0,nullptr);
     }
     void loadModel(const std::vector<uint8_t>& packet) {
         Reader r{packet}; vertexCount=r.u32(); uint32_t triangleCount=r.u32(), materialCount=r.u32(), textureCount=r.u32();
@@ -261,6 +296,7 @@ struct NativeRenderer {
             transition(tex.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_GENERIC_READ);textureView(tex.Get(),8+i);images.push_back(tex); }
         buildAcceleration(); d.submit(); uploads.clear(); hasModel=true;
         previousVertexBuffer=vertexBuffer;historyValid=false;stableFrames=0;poseChanged=false;aaHistoryValid=false;aaStableFrames=0;
+        materialStackIds.clear(); // stale per-material assignments; JS resends after load
     }
     void updatePose(const std::vector<uint8_t>& packet) {
         if(!hasModel || packet.size()!=size_t(vertexCount)*sizeof(NativeVertex))throw std::runtime_error("Invalid pose vertex count");
@@ -342,10 +378,22 @@ struct NativeRenderer {
         for(int pass=0;pass<(normals?1:2);pass++) for(size_t start=0;start<triangles.size();) {
             size_t end=start+1;uint32_t mat=triangles[start].material;while(end<triangles.size()&&triangles[end].material==mat)end++;
             bool transparent=materials[mat].options[1]>0;
-            if(normals||int(transparent)==pass) { d.list->SetPipelineState(normals?normalPso.Get():wireframe?wirePso.Get():colorSamples==1?(materials[mat].extra[3]>0?aaColorPso.Get():aaTransparentPso.Get()):(materials[mat].extra[3]>0?colorPso.Get():transparentPso.Get()));uint32_t values[4]{mat,0,UINT(start),0};d.list->SetGraphicsRoot32BitConstants(1,4,values,0);d.list->DrawIndexedInstanced(UINT((end-start)*3),1,UINT(start*3),0,0); }
+            if(normals||int(transparent)==pass) {
+                ID3D12PipelineState* pso=normalPso.Get();
+                if(!normals){
+                    uint32_t sid=mat<materialStackIds.size()?materialStackIds[mat]:0;
+                    auto it=sid?stackPsos.find(sid):stackPsos.end();
+                    const PsoSet* set=it!=stackPsos.end()?&it->second:nullptr;
+                    bool dw=materials[mat].extra[3]>0;
+                    if(wireframe)pso=set?set->wire.Get():wirePso.Get();
+                    else if(colorSamples==1)pso=set?(dw?set->aaColor.Get():set->aaTransparent.Get()):(dw?aaColorPso.Get():aaTransparentPso.Get());
+                    else pso=set?(dw?set->color.Get():set->transparent.Get()):(dw?colorPso.Get():transparentPso.Get());
+                }
+                d.list->SetPipelineState(pso);uint32_t values[4]{mat,0,UINT(start),0};d.list->SetGraphicsRoot32BitConstants(1,4,values,0);d.list->DrawIndexedInstanced(UINT((end-start)*3),1,UINT(start*3),0,0);
+            }
             start=end;
         }
-        if(!normals&&outlines){d.list->SetPipelineState(colorSamples==1?aaOutlinePso.Get():outlinePso.Get());for(size_t start=0;start<triangles.size();){size_t end=start+1;uint32_t mat=triangles[start].material;while(end<triangles.size()&&triangles[end].material==mat)end++;uint32_t values[4]{mat,0,0,0};d.list->SetGraphicsRoot32BitConstants(1,4,values,0);d.list->DrawIndexedInstanced(UINT((end-start)*3),1,UINT(start*3),0,0);start=end;}}
+        if(!normals&&outlines){d.list->SetPipelineState(colorSamples==1?aaOutlinePso.Get():outlinePso.Get());for(size_t start=0;start<triangles.size();){size_t end=start+1;uint32_t mat=triangles[start].material;while(end<triangles.size()&&triangles[end].material==mat)end++;uint32_t sid=mat<materialStackIds.size()?materialStackIds[mat]:0;auto ot=stackOutline.find(sid);if(ot!=stackOutline.end()&&ot->second){uint32_t values[4]{mat,0,0,0};d.list->SetGraphicsRoot32BitConstants(1,4,values,0);d.list->DrawIndexedInstanced(UINT((end-start)*3),1,UINT(start*3),0,0);}start=end;}}
     }
     void denoiseShadows() {
         bindings(false);
@@ -375,7 +423,7 @@ struct NativeRenderer {
     static float halton(uint32_t index,uint32_t base){float result=0,f=1;while(index){f/=float(base);result+=f*(index%base);index/=base;}return result;}
     std::string render(const std::vector<uint8_t>& packet) {
         if(!hasModel)throw std::runtime_error("Load a model before rendering");Reader r{packet};uint32_t id=r.u32();float frame[76];memcpy(frame,r.take(sizeof(frame)),sizeof(frame));
-        wireframe=frame[55]>0;outlines=frame[49]>0&&frame[63]>0&&!wireframe;
+        wireframe=frame[55]>0;outlines=frame[63]>0&&!wireframe;
         for(float f:frame)if(!std::isfinite(f))throw std::runtime_error("Invalid frame constants");
         frame[72]=std::clamp(frame[72],0.0f,1.0f);
         if(frame[44]<1||frame[45]<1||frame[44]>4096||frame[45]>4096)throw std::runtime_error("Unsupported viewport size");

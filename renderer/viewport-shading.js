@@ -28,17 +28,17 @@ export class ViewportShading {
     this.mode = 'lambert';
   }
 
-  variant(source, mode) {
+  variant(source) {
     const record = this.records.get(source);
     if (!record) return source; // custom shaders keep their own rendering contract
-    if (!record.variants[mode]) {
-      const material = mode === 'toon' ? new THREE.MeshToonMaterial() : new THREE.MeshLambertMaterial();
-      if (material !== source) {
-        THREE.Material.prototype.copy.call(material, source);
-      }
-      record.variants[mode] = material;
+    // Shading look is driven by per-material shader stacks on a neutral Lambert
+    // base; the variant only carries surface props + emissive-nits overrides.
+    if (!record.variants.lambert) {
+      const material = new THREE.MeshLambertMaterial();
+      if (material !== source) THREE.Material.prototype.copy.call(material, source);
+      record.variants.lambert = material;
     }
-    return record.variants[mode];
+    return record.variants.lambert;
   }
 
   sync() {
@@ -75,11 +75,10 @@ export class ViewportShading {
     this.sync();
   }
 
-  apply(mode) {
-    if (!['lambert', 'toon'].includes(mode)) throw new Error(`Unknown viewport mode: ${mode}`);
-    this.mode = mode;
+  apply() {
+    this.mode = 'lambert';
     for (const { mesh, original } of this.bindings) {
-      mesh.material = Array.isArray(original) ? original.map((source) => this.variant(source, mode)) : this.variant(original, mode);
+      mesh.material = Array.isArray(original) ? original.map((source) => this.variant(source)) : this.variant(original);
     }
     this.sync();
   }

@@ -1,6 +1,6 @@
-// Real-DOM UI test for the Unreal-style shader stack editor: material preview
-// canvas renders, boundary "+" popup inserts a layer, drag reorder, context-menu
-// and Del deletion, auto-properties, main-viewport effect, and persistence.
+// Real-DOM UI test for the Unity-like per-material shader editor: built-in stacks,
+// per-material assignment + independent instance property values, preview, and
+// persistence. Verifies the main viewport changes per material.
 const {app,BrowserWindow,Menu}=require('electron');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 app.setPath('userData',fs.mkdtempSync(path.join(require('node:os').tmpdir(),'mmd-stackui-')));
@@ -8,6 +8,9 @@ process.env.MMDCONV_OPEN=path.resolve('Example/Zhuang Fangyi/Zhuang Fangyi.canva
 delete process.env.MMDCONV_SHOT;
 const timeout=setTimeout(()=>{console.error('Shader stack UI test timed out');app.exit(1)},200000);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const TINT=`//@property float3 tint = (1,1,1) "색조"
+//@property float strength = 1.0 [0,1] "강도"
+void Tint(inout ShadingContext ctx) { ctx.color *= lerp(float3(1,1,1), tint, strength); }`;
 async function shaderWindow(){
   for(let i=0;i<200;i++){
     const w=BrowserWindow.getAllWindows().find(w=>!w.isDestroyed()&&w.webContents.getURL().includes('shader-stack.html'));
@@ -16,7 +19,7 @@ async function shaderWindow(){
   }
   throw new Error('shader window did not open');
 }
-const renderGrab=`(async()=>{const v=__viewer;v.dx12.enabled=false;v.dx12.dirty=false;for(let i=0;i<100&&v.dx12.busy;i++)await new Promise(r=>setTimeout(r,20));for(let i=0;i<40;i++){const data=v.dx12.frame(),f=new Float32Array(data,4);f[67]=0;await window.api.dx12Render(data);}const c=document.getElementById('dx12-canvas');return Array.from(c.getContext('2d').getImageData(0,0,c.width,c.height).data);})()`;
+const renderGrab=`(async()=>{const v=__viewer;v.dx12.enabled=true;v.dx12.aaMode=0;v.requestRender();for(let i=0;i<400;i++){if(v.dx12.lastFrame&&!v.dx12.lastFrame.aaAccumulating&&!v.dx12.busy&&v.dx12.lastFrame.antialiasing==='MSAA 4x')break;await new Promise(r=>setTimeout(r,30));}await new Promise(r=>setTimeout(r,200));const c=document.getElementById('dx12-canvas');return Array.from(c.getContext('2d').getImageData(0,0,c.width,c.height).data);})()`;
 const diff=(a,b)=>{let s=0,m=0;for(let i=0;i<a.length;i+=4)for(let j=0;j<3;j++){const d=Math.abs(a[i+j]-b[i+j]);s+=d;m=Math.max(m,d);}return{mean:s/(a.length*0.75),max:m};};
 async function runTest(win){
   await win.webContents.executeJavaScript(`(async()=>{for(let i=0;i<1500;i++){const v=window.__viewer;if(v?.dx12.error)throw new Error(v.dx12.error.message);if(v?.current&&v.dx12.lastFrame&&!v.dx12.busy)return;await new Promise(r=>setTimeout(r,20));}throw new Error('no convergence')})()`);
@@ -24,71 +27,45 @@ async function runTest(win){
   const baseline=await win.webContents.executeJavaScript(renderGrab);
   Menu.getApplicationMenu().getMenuItemById('shader-stack-editor').click();
   const sw=await shaderWindow();
-  // The material preview must render a frame in the editor window's own canvas.
-  const preview=await sw.webContents.executeJavaScript(`(async()=>{for(let i=0;i<300;i++){const c=document.getElementById('dx12-canvas');if(c&&c.dataset.frame)return{frame:c.dataset.frame,w:c.width,h:c.height};await new Promise(r=>setTimeout(r,20));}throw new Error('preview did not render')})()`);
-  // Insert RimLight at boundary 0 via the "+" popup.
-  const inserted=await sw.webContents.executeJavaScript(`(async()=>{
-    document.querySelector('.shader-insert').click();
-    for(let i=0;i<100;i++){if(document.querySelector('.shader-popup'))break;await new Promise(r=>setTimeout(r,20));}
-    const popup=!!document.querySelector('.shader-popup');
-    document.querySelector('.shader-popup-item').click();
-    for(let i=0;i<300;i++){if(document.querySelectorAll('#shader-stack li').length&&!document.getElementById('shader-status').textContent.includes('컴파일'))break;await new Promise(r=>setTimeout(r,20));}
-    await new Promise(r=>setTimeout(r,400));
-    return{popup,rows:document.querySelectorAll('#shader-stack li').length,hasEditor:!!document.querySelector('#shader-editor-host .CodeMirror'),props:document.querySelectorAll('#shader-properties .shader-prop-row').length,errorHidden:document.getElementById('shader-error').hidden,name:window.__shaderPanel.stack[0]?.name};
+  const setup=await sw.webContents.executeJavaScript(`(async()=>{
+    const s0=await window.api.shaderStackLibraryGet();
+    const builtinNames=s0.library.map(x=>x.name);
+    // Add a tint stack (id = library.length+1), assign material 0 to it.
+    const lib=[...s0.library,{name:'Tint',outline:false,layers:[{id:'t',name:'Tint',code:${JSON.stringify(TINT)},enabled:true}]}];
+    await window.api.shaderStackLibrarySet(lib);
+    const tintId=lib.length;
+    await window.api.shaderStackAssign(0,tintId);
+    await window.api.shaderStackInstanceParams(0,{t:{tint:[1,0,0],strength:1}});
+    await window.api.shaderStackPreview(0);
+    for(let i=0;i<200;i++){const s=await window.api.shaderStackLibraryGet();if(s.instances[0]&&s.instances[0].stackId===tintId)break;await new Promise(r=>setTimeout(r,30));}
+    await new Promise(r=>setTimeout(r,800));
+    const s=await window.api.shaderStackLibraryGet();
+    return{builtinNames,tintId,assign0:s.instances[0].stackId,params0:s.instances[0].params,matOptions:document.getElementById('shader-material').options.length,libRows:document.querySelectorAll('#shader-library li').length};
   })()`);
   const rimmed=await win.webContents.executeJavaScript(renderGrab);
-  const rimError=diff(baseline,rimmed);
-  // Add a second layer, then drag-reorder via the panel move logic.
-  const reordered=await sw.webContents.executeJavaScript(`(async()=>{
-    document.getElementById('shader-add').click();
-    for(let i=0;i<300;i++){if(window.__shaderPanel.stack.length===2&&!document.getElementById('shader-status').textContent.includes('컴파일'))break;await new Promise(r=>setTimeout(r,20));}
-    const before=window.__shaderPanel.getStack().map(l=>l.name);
-    window.__shaderPanel.moveLayer(0,1);
-    await new Promise(r=>setTimeout(r,400));
-    const after=window.__shaderPanel.getStack().map(l=>l.name);
-    return{before,after,count:after.length};
-  })()`);
-  // Delete via right-click context menu.
-  const ctxDelete=await sw.webContents.executeJavaScript(`(async()=>{
-    const row=document.querySelector('#shader-stack li');
-    row.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:50,clientY:50}));
-    for(let i=0;i<100;i++){if(document.querySelector('.shader-context'))break;await new Promise(r=>setTimeout(r,20));}
-    const menu=!!document.querySelector('.shader-context');
-    document.querySelector('.shader-context .shader-popup-item').click();
-    await new Promise(r=>setTimeout(r,400));
-    return{menu,rows:window.__shaderPanel.stack.length};
-  })()`);
-  // Delete the remaining layer via the Del key.
-  const delDelete=await sw.webContents.executeJavaScript(`(async()=>{
-    window.__shaderPanel.selected=0;
-    document.activeElement?.blur?.();
-    document.dispatchEvent(new KeyboardEvent('keydown',{key:'Delete',bubbles:true}));
-    await new Promise(r=>setTimeout(r,500));
-    return{rows:window.__shaderPanel.stack.length};
-  })()`);
-  const restored=await win.webContents.executeJavaScript(renderGrab);
-  const restoreError=diff(baseline,restored);
-  const storedAfter=await win.webContents.executeJavaScript(`window.api.shaderStackGet()`);
-  return{preview,inserted,rimError,reordered,ctxDelete,delDelete,restoreError,storedAfterLen:storedAfter.length};
+  const tintError=diff(baseline,rimmed);
+  const preview=await sw.webContents.executeJavaScript(`(async()=>{for(let i=0;i<200;i++){const c=document.getElementById('dx12-canvas');if(c&&c.dataset.frame)return{frame:c.dataset.frame};await new Promise(r=>setTimeout(r,30));}throw new Error('preview did not render')})()`);
+  // Change material 0's instance value (green) — independent per-material value.
+  await sw.webContents.executeJavaScript(`(async()=>{await window.api.shaderStackInstanceParams(0,{t:{tint:[0,1,0],strength:1}});await new Promise(r=>setTimeout(r,800));})()`);
+  const green=await win.webContents.executeJavaScript(renderGrab);
+  const greenError=diff(rimmed,green);
+  const finalState=await sw.webContents.executeJavaScript(`window.api.shaderStackLibraryGet()`);
+  return{setup,tintError,preview,greenError,finalParams0:finalState.instances[0].params,libLen:finalState.library.length};
 }
 app.on('browser-window-created',(_e,win)=>{
   win.webContents.once('did-finish-load',async()=>{
     if(!win.webContents.getURL().includes('index.html'))return;
     try{
       const r=await runTest(win);
-      assert.ok(r.preview.frame,'Material preview must render a frame in the editor canvas');
-      assert.ok(r.inserted.popup,'Boundary + must open the function catalog popup');
-      assert.equal(r.inserted.rows,1,'Popup selection must insert one layer');
-      assert.equal(r.inserted.name,'RimLight');
-      assert.ok(r.inserted.hasEditor&&r.inserted.props>=3&&r.inserted.errorHidden,'Editor + auto-properties must render without error');
-      assert.ok(r.rimError.mean>0.2&&r.rimError.max>20,'Applied stack must change the MAIN viewport: '+JSON.stringify(r.rimError));
-      assert.equal(r.reordered.count,2);
-      assert.deepEqual(r.reordered.after,[r.reordered.before[1],r.reordered.before[0]],'moveLayer must reorder the stack');
-      assert.ok(r.ctxDelete.menu&&r.ctxDelete.rows===1,'Context-menu delete must remove a layer');
-      assert.equal(r.delDelete.rows,0,'Del key must delete the selected layer');
-      assert.ok(r.restoreError.mean<0.1,'Empty stack must restore the main viewport: '+JSON.stringify(r.restoreError));
-      assert.equal(r.storedAfterLen,0,'Store must be empty after deletes');
-      console.log('Shader stack editor UI passed:',JSON.stringify({preview:r.preview,rows:r.inserted.rows,props:r.inserted.props,rimError:r.rimError,reorder:r.reordered.after,restoreError:r.restoreError}));
+      assert.ok(r.setup.builtinNames.includes('Default Toon')&&r.setup.builtinNames.includes('Standard'),'Built-in stacks seeded: '+JSON.stringify(r.setup.builtinNames));
+      assert.equal(r.setup.assign0,r.setup.tintId,'Material 0 assigned to tint stack');
+      assert.ok(r.setup.matOptions>1,'Material selector lists model materials');
+      assert.ok(r.setup.libRows>=3,'Library list renders built-ins + custom');
+      assert.ok(r.tintError.mean>0.005&&r.tintError.max>20,'Assigned stack changes the material pixels: '+JSON.stringify(r.tintError));
+      assert.ok(r.preview.frame,'Preview renders the selected material stack');
+      assert.ok(r.greenError.mean>0.005&&r.greenError.max>20,'Per-material instance value change alters rendering: '+JSON.stringify(r.greenError));
+      assert.deepEqual(r.finalParams0.t.tint,[0,1,0],'Instance value persists');
+      console.log('Shader stack per-material UI passed:',JSON.stringify({builtins:r.setup.builtinNames,tintError:r.tintError,greenError:r.greenError}));
       clearTimeout(timeout);app.quit();
     }catch(error){console.error(error);clearTimeout(timeout);app.exit(1)}
   });

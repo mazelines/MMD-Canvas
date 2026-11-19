@@ -39,4 +39,14 @@ void viewer.dx12.start();
 const panel = new ShaderStackPanel();
 window.__shaderPanel = panel;
 await panel.load();
-api.onShaderStackUpdated(layers => panel.setStack(layers));
+function syncPreview(state) {
+  // The sphere previews the selected material's stack with that material's values.
+  const inst = (state.instances || [])[state.previewMaterial || 0] || { stackId: 0, params: {} };
+  viewer.dx12.library = state.library || [];
+  viewer.dx12.stride = state.stride || 1;
+  viewer.dx12.instances = [inst];
+  viewer.dx12.materialAssign = [inst.stackId || 0];
+  viewer.requestRender();
+}
+api.onShaderStackUpdated(state => { panel.setState(state); syncPreview(state); });
+syncPreview(await api.shaderStackLibraryGet());

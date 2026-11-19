@@ -102,7 +102,7 @@ export class MaterialPanel {
     const m = entry.material;
     host.append(node('div', { className: 'material-heading' }, node('h3', { textContent: entry.name }),
       node('span', { className: 'material-badge', textContent: m.visible ? t('표시 중') : t('숨김') })),
-      node('div', { className: 'material-type', textContent: t`${m.type} · 뷰포트 ${this.viewer.renderMode === 'toon' ? 'Toon' : 'Lambert'}` }));
+      node('div', { className: 'material-type', textContent: t`${m.type}` }));
     const section = (title) => {
       const block = node('section', { className: 'material-section' }, node('h4', { textContent: title }));
       host.append(block);

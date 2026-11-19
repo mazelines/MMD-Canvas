@@ -97,8 +97,8 @@ export class Dx12Host {
     try { this.send(opcode, bytes); } catch (error) { this.fail(error); }
     return result;
   }
-  async model(bytes) { if (!(bytes instanceof ArrayBuffer) || bytes.byteLength > 512 * 1024 * 1024) throw new Error('Invalid native model packet'); return this.request('model', 1, bytes); }
-  async pose(bytes) { if (!(bytes instanceof ArrayBuffer) || bytes.byteLength > 160 * 1024 * 1024) throw new Error('Invalid native pose packet'); return this.request('pose', 5, bytes); }
+  async model(bytes) { if (!(bytes instanceof ArrayBuffer) || bytes.byteLength > 512 * 1024 * 1024) throw new Error('Invalid native model packet'); return this.serial(() => this.request('model', 1, bytes)); }
+  async pose(bytes) { if (!(bytes instanceof ArrayBuffer) || bytes.byteLength > 160 * 1024 * 1024) throw new Error('Invalid native pose packet'); return this.serial(() => this.request('pose', 5, bytes)); }
   // Hot-swap the character color PSOs with runtime-compiled blobs. Pass null to
   // restore the build-time default shader. Layout: u32 colorLen, color, u32 aaLen, aa.
   async shader(colorBlob, aaBlob) {
@@ -117,6 +117,31 @@ export class Dx12Host {
   // Fire-and-forget: parameter uploads queue between renders on the single-threaded
   // native loop (fence-waited, so safe) and must not collide with the render channel.
   setParams(data) { if (!(data instanceof ArrayBuffer)) throw new Error('Invalid shader params'); this.send(7, data); }
+  // Load a per-material shader library: stacks = [{ stackId, color, aa }]. Empty
+  // array clears the library. Layout: u32 count, then per stack u32 stackId,
+  // u32 colorLen, color, u32 aaLen, aa.
+  async shaderLibrary(stacks) {
+    const parts = [Buffer.alloc(4)]; parts[0].writeUInt32LE(stacks.length, 0);
+    for (const s of stacks) {
+      const color = Buffer.from(s.color), aa = Buffer.from(s.aa);
+      const sid = Buffer.alloc(4), ol = Buffer.alloc(4), cl = Buffer.alloc(4), al = Buffer.alloc(4);
+      sid.writeUInt32LE(s.stackId, 0); ol.writeUInt32LE(s.outline ? 1 : 0, 0); cl.writeUInt32LE(color.length, 0); al.writeUInt32LE(aa.length, 0);
+      // Native reads: stackId, outline, colorLen, color, aaLen, aa (interleaved).
+      parts.push(sid, ol, cl, color, al, aa);
+    }
+    const result = await this.serial(() => this.request('shaderlib', 8, Buffer.concat(parts)));
+    if (!result.ok) throw new Error(result.error || 'Shader library load failed');
+    return result;
+  }
+  // Per-material stackId assignment (indexed by native materialId; 0 = base).
+  async materialStacks(stackIds) {
+    const buf = Buffer.alloc(4 + stackIds.length * 4);
+    buf.writeUInt32LE(stackIds.length, 0);
+    stackIds.forEach((id, i) => buf.writeUInt32LE(id, 4 + i * 4));
+    const result = await this.serial(() => this.request('matstacks', 9, buf));
+    if (!result.ok) throw new Error(result.error || 'Material stack assignment failed');
+    return result;
+  }
   async render(bytes) {
     if (!(bytes instanceof ArrayBuffer) || bytes.byteLength !== 308) throw new Error('Invalid native frame packet');
     // Backpressure: the native command loop must stay free to receive release
