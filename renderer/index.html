@@ -81,16 +81,6 @@
       </div>
       <div class="viewport-modes" role="group" aria-label="뷰포트 렌더링 모드">
         <div class="renderer-settings"><strong>DirectX 12 Ultimate</strong><select id="viewport-aa" aria-label="안티앨리어싱" title="DLAA는 원래 해상도에서 화질을 개선합니다. DLSS는 낮은 해상도를 복원해 렌더링 부하를 줄입니다."><option value="0">MSAA 4×</option><option value="1" selected>DLAA</option><option value="2">DLSS Quality</option><option value="3">DLSS Balanced</option></select><select id="dxr-quality" aria-label="DXR 그림자 품질" title="1·2·4광선은 시간 누적과 디노이징으로 복원합니다. 참조 모드는 느린 품질 비교용입니다."><option value="1">DXR · 실시간 (1)</option><option value="2">DXR · 균형 (2)</option><option value="4" selected>DXR · 고품질 (4)</option><option value="128">DXR · 참조 (128)</option></select><label class="sharpen-row" for="viewport-sharpen" title="DLAA·DLSS 복원 후 윤곽을 선명하게 합니다. 모든 AA 모드에서 동작하며 0%는 끄기입니다."><span>샤픈</span><input id="viewport-sharpen" type="range" min="0" max="100" step="5" value="25" aria-label="샤픈 강도"><output id="viewport-sharpen-value">25%</output></label><output id="renderer-status">DirectX 12 Ultimate</output></div>
-        <div class="viewport-mode-buttons">
-        <button id="mode-lambert" class="viewport-mode" data-mode="lambert" aria-label="Lambert 렌더링" aria-pressed="true" title="Lambert — 부드러운 명암">
-          <svg viewBox="0 0 32 32" aria-hidden="true"><defs><radialGradient id="lambert-sphere" cx="30%" cy="25%" r="78%"><stop offset="0" stop-color="#f2f6ff"/><stop offset=".34" stop-color="#bbc9df"/><stop offset=".73" stop-color="#677b9b"/><stop offset="1" stop-color="#29364c"/></radialGradient></defs><circle cx="16" cy="16" r="13" fill="url(#lambert-sphere)" stroke="#a5b7cf" stroke-opacity=".45"/></svg>
-          <span>Lambert</span>
-        </button>
-        <button id="mode-toon" class="viewport-mode" data-mode="toon" aria-label="Toon 렌더링과 아웃라인" aria-pressed="false" title="Toon — 단계형 명암과 헐 아웃라인">
-          <svg viewBox="0 0 32 32" aria-hidden="true"><defs><clipPath id="toon-sphere-clip"><circle cx="16" cy="16" r="13"/></clipPath></defs><g clip-path="url(#toon-sphere-clip)"><circle cx="16" cy="16" r="13" fill="#34445e"/><ellipse cx="11" cy="11" rx="15" ry="14" fill="#8dabc9"/><ellipse cx="8" cy="7" rx="12" ry="11" fill="#e3efff"/></g><circle cx="16" cy="16" r="13" fill="none" stroke="#101722" stroke-width="2"/></svg>
-          <span>Toon</span>
-        </button>
-        </div>
         <section class="cortao-settings" aria-label="CORTAO 설정">
           <div class="cortao-heading"><label class="toggle" title="틈과 접촉부의 주변광을 줄여 입체감을 더합니다."><input id="cortao-enabled" type="checkbox" checked>CORTAO</label><button id="cortao-reset" title="CORTAO 기본값 복원" aria-label="CORTAO 기본값 복원">↺</button></div>
           <label class="cortao-row" for="cortao-intensity"><span>강도</span><input id="cortao-intensity" type="number" min="0" max="2" step="0.1" value="1" aria-label="CORTAO 강도"></label>
@@ -98,7 +88,7 @@
           <label class="cortao-row cortao-debug-row" for="cortao-debug"><span>Debug View</span><select id="cortao-debug" aria-label="CORTAO Debug View"><option value="off">일반 렌더링</option><option value="ao">AO만 보기</option><option value="raw">필터 전 AO</option></select></label>
           <p id="cortao-debug-hint" class="cortao-debug-hint" aria-live="polite" hidden></p>
         </section>
-        <section id="toon-settings" class="toon-settings" aria-label="Toon 아웃라인 설정" hidden>
+        <section id="toon-settings" class="toon-settings" aria-label="아웃라인 설정">
           <div class="toon-settings-heading"><h3>아웃라인</h3><button id="outline-reset" title="아웃라인 기본값 복원" aria-label="아웃라인 기본값 복원">↺</button></div>
           <div class="outline-width-row"><label for="outline-width">두께</label><input id="outline-width-number" type="number" min="0" max="8" step="0.1" value="1.6" aria-label="아웃라인 두께 수치"><span>px</span></div>
           <input id="outline-width" type="range" min="0" max="8" step="0.1" value="1.6" aria-label="아웃라인 두께">

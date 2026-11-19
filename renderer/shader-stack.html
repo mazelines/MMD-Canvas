@@ -34,7 +34,17 @@
     </section>
     <aside class="shader-right">
       <section class="panel">
-        <h2>함수 스택 <button id="shader-add" class="link">함수 추가</button><button id="shader-reset" class="link">기본값</button></h2>
+        <h2>머티리얼</h2>
+        <label class="shader-select-row"><span>대상</span><select id="shader-material" aria-label="머티리얼 선택"></select></label>
+        <label class="shader-select-row"><span>셰이더</span><select id="shader-material-stack" aria-label="머티리얼 셰이더 할당"></select></label>
+        <div class="material-note">머티리얼마다 셰이더 스택을 할당합니다. 여러 머티리얼이 같은 스택을 공유할 수 있습니다.</div>
+      </section>
+      <section class="panel">
+        <h2>스택 라이브러리 <button id="shader-library-add" class="link">스택 추가</button></h2>
+        <ul id="shader-library" aria-label="셰이더 스택 라이브러리"></ul>
+      </section>
+      <section class="panel">
+        <h2>함수 스택 <span id="shader-stack-name" class="count"></span> <button id="shader-add" class="link">함수 추가</button><button id="shader-reset" class="link">기본값</button></h2>
         <ul id="shader-stack" aria-label="셰이더 함수 스택"></ul>
         <div class="material-note">레이어를 드래그해 순서를 바꾸고, 경계의 + 로 함수를 삽입합니다. 선택 후 Del 또는 우클릭으로 삭제합니다.</div>
       </section>

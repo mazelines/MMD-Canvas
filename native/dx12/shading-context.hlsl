@@ -28,6 +28,8 @@ struct ShadingContext {
     float  ao;           // combined material/screen AO
     float3 sunDir;
     float  sunLux;
+    float  ambientLux;
+    uint   materialId;
     float3 skyColor;
     float3 groundColor;
     // Screen-space (for depth-based effects)

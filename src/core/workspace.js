@@ -20,6 +20,17 @@ const choice = (v, field, choices) => choices.includes(v) ? v : fail(field);
 const vector = (v, field) => Array.isArray(v) && v.length === 3 ? v.map((n) => number(n, field, -1e15, 1e15)) : fail(field);
 const list = (v, field, fn) => Array.isArray(v) && v.length <= 100000 ? v.map(fn) : fail(field);
 const nullablePath = (v, field) => v === null ? null : string(v, field);
+const shaderLayer = (item, field) => {
+  const l = object(item, `${field}.layer`);
+  const rawParams = l.params === undefined ? {} : object(l.params, `${field}.params`);
+  const params = {};
+  for (const [key, val] of Object.entries(rawParams).slice(0, 256)) {
+    if (typeof val === 'number' && Number.isFinite(val)) params[key] = val;
+    else if (Array.isArray(val) && val.length <= 4 && val.every((n) => typeof n === 'number' && Number.isFinite(n))) params[key] = val;
+  }
+  return { id: string(l.id, `${field}.id`, 64), name: string(l.name, `${field}.name`, 128),
+    code: string(l.code, `${field}.code`, 32768), enabled: bool(l.enabled, `${field}.enabled`), params };
+};
 
 /** Validate before changing the UI or writing a file; only known, inert state is retained. */
 export function validateWorkspace(value) {
@@ -42,7 +53,7 @@ export function validateWorkspace(value) {
         radius: number(cortao.radius, 'cortao.radius', 0.1, 10) },
       exposure: { ev100: number(exposure.ev100, 'exposure.ev100', MIN_EV100, MAX_EV100),
         compensation: number(exposure.compensation, 'exposure.compensation', -MAX_EXPOSURE_COMPENSATION, MAX_EXPOSURE_COMPENSATION) },
-      mode: choice(v.mode, 'mode', ['lambert', 'toon']),
+      mode: v.mode === undefined ? 'lambert' : choice(v.mode, 'mode', ['lambert', 'toon']),
       outline: { width: number(outline.width, 'outline.width', 0, 8), color: /^#[0-9a-f]{6}$/i.test(outline.color) ? outline.color : fail('outline.color') },
       flags: Object.fromEntries(['grid', 'skeleton', 'wireframe'].map((key) => [key, bool(flags[key], key)])),
       lightUnit: v.lightUnit === undefined ? 'lux' : choice(v.lightUnit, 'lightUnit', ['lux']),
@@ -60,17 +71,32 @@ export function validateWorkspace(value) {
         near: number(camera.near, 'camera.near', 1e-12, 1e15), far: number(camera.far, 'camera.far', 1e-12, 1e15),
         maxDistance: number(camera.maxDistance, 'camera.maxDistance', 1e-12, 1e15),
       },
-      shaderStack: v.shaderStack === undefined ? [] : list(v.shaderStack, 'shaderStack', (item) => {
-        const l = object(item, 'shaderStack.layer');
-        const rawParams = l.params === undefined ? {} : object(l.params, 'shaderStack.params');
+      // Legacy global stack (migrated to a library on restore).
+      shaderStack: v.shaderStack === undefined ? [] : list(v.shaderStack, 'shaderStack', (item) => shaderLayer(item, 'shaderStack')),
+      // Per-material shader library: stacks of layers (with outline flag).
+      shaderLibrary: v.shaderLibrary === undefined ? [] : list(v.shaderLibrary, 'shaderLibrary', (item) => {
+        const s = object(item, 'shaderLibrary.stack');
+        return { name: string(s.name, 'shaderLibrary.name', 128), outline: s.outline === undefined ? false : bool(s.outline, 'shaderLibrary.outline'),
+          layers: s.layers === undefined ? [] : list(s.layers, 'shaderLibrary.layers', (l) => shaderLayer(l, 'shaderLibrary.layers')) };
+      }).slice(0, 64),
+      // Legacy material->stackId map (migrated to instances on restore).
+      materialAssign: v.materialAssign === undefined ? [] : list(v.materialAssign, 'materialAssign', (id) => number(id, 'materialAssign', 0, 64)).slice(0, 100000),
+      // Unity-style material instances: per-material stackId + independent params.
+      materialInstances: v.materialInstances === undefined ? [] : list(v.materialInstances, 'materialInstances', (item) => {
+        const inst = object(item, 'materialInstances.item');
+        const rawParams = inst.params === undefined ? {} : object(inst.params, 'materialInstances.params');
         const params = {};
-        for (const [key, val] of Object.entries(rawParams).slice(0, 256)) {
-          if (typeof val === 'number' && Number.isFinite(val)) params[key] = val;
-          else if (Array.isArray(val) && val.length <= 4 && val.every((n) => typeof n === 'number' && Number.isFinite(n))) params[key] = val;
+        for (const [layerId, layerVals] of Object.entries(rawParams).slice(0, 256)) {
+          const lv = object(layerVals, 'materialInstances.params.layer');
+          const clean = {};
+          for (const [key, val] of Object.entries(lv).slice(0, 256)) {
+            if (typeof val === 'number' && Number.isFinite(val)) clean[key] = val;
+            else if (Array.isArray(val) && val.length <= 4 && val.every((n) => typeof n === 'number' && Number.isFinite(n))) clean[key] = val;
+          }
+          params[layerId] = clean;
         }
-        return { id: string(l.id, 'shaderStack.id', 64), name: string(l.name, 'shaderStack.name', 128),
-          code: string(l.code, 'shaderStack.code', 32768), enabled: bool(l.enabled, 'shaderStack.enabled'), params };
-      }),
+        return { stackId: number(inst.stackId, 'materialInstances.stackId', 0, 64), params };
+      }).slice(0, 100000),
     },
     conversion: {
       mode: choice(c.mode, 'conversion.mode', ['single', 'batch']), format: choice(c.format, 'conversion.format', ['fbx', 'usda', 'usdz']),

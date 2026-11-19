@@ -39,22 +39,26 @@ app.on('browser-window-created',(_event,win)=>win.webContents.once('did-finish-l
       v.camera.position.copy(head).addScaledVector(offset,0.5);v.camera.lookAt(head);v.camera.aspect=1;v.camera.updateProjectionMatrix();v.camera.updateMatrixWorld();
       const draw=async()=>{const data=v.dx12.frame(),f=new Float32Array(data,4);f[44]=256;f[45]=256;f[67]=0;f[50]=0;f[51]=0;f[72]=0;await api.dx12Render(data);const c=document.getElementById('dx12-canvas');return c.getContext('2d').getImageData(0,0,c.width,c.height).data;};
       const diff=(a,b)=>{let sum=0,max=0;for(let i=0;i<a.length;i+=4)for(let j=0;j<3;j++){const d=Math.abs(a[i+j]-b[i+j]);sum+=d;max=Math.max(max,d);}return{mean:sum/(a.length*0.75),max};};
-      const {packParams}=await import('../src/core/shader-stack.js');
+      const {packMaterialParams,parseStack}=await import('../src/core/shader-stack.js');
+      // Route every native material to the base shader (0) so the opcode-6 base
+      // hot-swap affects the whole character, and pack params per materialId*stride.
+      await api.dx12MaterialStacks(new Array(256).fill(0));
+      const packFor=(layer,vals)=>{const stride=parseStack([layer]).slotCount;const lib=[{layers:[layer]}],inst=[],pi=[];for(let i=0;i<256;i++){inst.push({stackId:1,params:{[layer.id]:vals}});pi.push(i);}return packMaterialParams(lib,inst,pi,stride,256).buffer;};
       const layer={id:'rim',name:'RimLight',code:${JSON.stringify(RIM)},enabled:true};
       const baseline=await draw();
       // Apply a user rim-light layer; the color PSOs hot-swap to the compiled stack.
       const load=await api.dx12Shader([layer]);
-      await api.dx12Params(packParams([layer],{rim:{strength:0.5,tint:[1,0,0]}}).buffer);
+      await api.dx12Params(packFor(layer,{strength:0.5,tint:[1,0,0]}));
       const rimmed=await draw();
       const rimError=diff(baseline,rimmed);
       // Modulate properties without recompiling: stronger green rim must differ.
-      await api.dx12Params(packParams([layer],{rim:{strength:1.0,tint:[0,1,0]}}).buffer);
+      await api.dx12Params(packFor(layer,{strength:1.0,tint:[0,1,0]}));
       const modulated=await draw();
       const paramError=diff(rimmed,modulated);
       // Depth-based rim light: samples neighbor scene depth along the light dir.
       const depthLayer={id:'depth',name:'DepthRimLight',code:${JSON.stringify(DEPTH_RIM)},enabled:true};
       const depthLoad=await api.dx12Shader([depthLayer]);
-      await api.dx12Params(packParams([depthLayer],{depth:{width:2.0,bias:0.05,fade:0.2,intensity:2.0}}).buffer);
+      await api.dx12Params(packFor(depthLayer,{width:2.0,bias:0.05,fade:0.2,intensity:2.0}));
       const depthRimmed=await draw();
       const depthError=diff(baseline,depthRimmed);
       // Restore the build-time default; pixels must return to baseline.

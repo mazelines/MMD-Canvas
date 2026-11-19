@@ -47,14 +47,26 @@ const materialPanel = new MaterialPanel(viewer);
 // hook (invoked via executeJavaScript) plus the IPC listener as a fallback.
 window.__shaderStackRender = () => viewer.requestRender();
 api.onShaderStackApplied(() => viewer.requestRender());
-const applyRenderMode = (mode, save = false) => {
-  viewer.setRenderMode(mode);
-  $('toon-settings').hidden = viewer.renderMode !== 'toon';
-  document.querySelectorAll('.viewport-mode').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.mode === viewer.renderMode)));
-  if (save) localStorage.setItem('viewportRenderMode', viewer.renderMode);
-};
-document.querySelectorAll('.viewport-mode').forEach((button) => button.addEventListener('click', () => applyRenderMode(button.dataset.mode, true)));
-applyRenderMode(localStorage.getItem('viewportRenderMode') === 'toon' ? 'toon' : 'lambert');
+// Per-material shader assignment: sync the assignment into the viewport (sceneKey
+// includes it, so a change re-exports the model with new native stackIds) and push
+// the material name list to main for the editor's material selector.
+const pushMaterialNames = () => api.shaderStackMaterials((viewer.current?.materials || []).map(m => m.name)).catch(() => {});
+api.onShaderStackUpdated((state) => {
+  if (!state) return;
+  viewer.dx12.library = state.library || [];
+  viewer.dx12.instances = state.instances || [];
+  viewer.dx12.stride = state.stride || 1;
+  viewer.dx12.materialAssign = (state.instances || []).map(i => i?.stackId || 0);
+  viewer.requestRender();
+});
+{
+  const prev = viewer.onMaterialsChanged;
+  viewer.onMaterialsChanged = () => { prev?.(); pushMaterialNames(); };
+}
+// Shading is per-material shader stacks now (no global Lambert/Toon mode). The
+// hull outline is a global renderer setting, always available.
+const applyRenderMode = () => { viewer.setRenderMode(); };
+applyRenderMode();
 const applyOutline = (width, color, save = true) => {
   viewer.setOutline(width, color);
   const settings = viewer.outlineSettings;
@@ -346,6 +358,7 @@ function renderInfo(info, filePath) {
 
   materialPanel.load();
   animationBar.load();
+  pushMaterialNames();
 
   $('panel-morphs').hidden = !info.morphList.length;
   $('morph-count').textContent = info.morphList.length;
@@ -717,7 +730,9 @@ async function saveWorkspace(saveAs = false) {
   state.workspaceBusy = true; updateWorkspaceBar();
   try {
     const data = captureWorkspace(viewer, state, materialPanel);
-    data.viewport.shaderStack = await api.shaderStackGet();
+    const lib = await api.shaderStackLibraryGet();
+    data.viewport.shaderLibrary = lib.library;
+    data.viewport.materialInstances = lib.instances;
     const result = await api.saveWorkspace(data, state.workspacePath, saveAs);
     if (!result) return;
     state.workspacePath = result.filePath;
@@ -754,9 +769,16 @@ async function openWorkspace(filePath = null, { remember = true } = {}) {
     state.restoring = true; // controls are driven through their own events; keep those out of the saved defaults
     try { changed = restoreWorkspaceState(data, viewer, state, materialPanel, applyRenderMode, applyOutline); }
     finally { state.restoring = false; reportMenuState(); }
-    // Restore the shader stack best-effort: a compile error or a not-yet-ready
-    // renderer must not abort the workspace open (state is kept in main).
-    try { await api.shaderStackApply(data.viewport.shaderStack || []); } catch { /* kept in main */ }
+    // Restore the shader library + per-material instances best-effort. Migrate a
+    // legacy global stack into a library stack assigned to every material.
+    try {
+      let library = data.viewport.shaderLibrary, instances = data.viewport.materialInstances;
+      if (!library && data.viewport.shaderStack?.length) {
+        library = [{ name: '기본', outline: data.viewport.mode === 'toon', layers: data.viewport.shaderStack }];
+        instances = (viewer.current?.materials || []).map(() => ({ stackId: 1, params: {} }));
+      }
+      await api.shaderStackRestore(library || [], instances || []);
+    } catch { /* kept in main */ }
     $('convert-dialog').close(); $('convert-result').hidden = true; state.lastOutput = null;
     state.workspacePath = result.filePath;
     if (remember) localStorage.setItem('lastWorkspace', result.filePath);
@@ -774,12 +796,9 @@ api.onOpenFile((filePath) => openPath(filePath));
 const MENU_FLAGS = ['flag-grid', 'flag-skeleton', 'flag-wireframe', 'flag-shadow', 'flag-light-gizmo'];
 function reportMenuState() {
   const menuState = Object.fromEntries(MENU_FLAGS.map((id) => [id, $(id).checked]));
-  menuState['mode-lambert'] = viewer.renderMode !== 'toon';
-  menuState['mode-toon'] = viewer.renderMode === 'toon';
   api.menuState(menuState);
 }
 for (const id of MENU_FLAGS) $(id).addEventListener('change', reportMenuState);
-document.querySelectorAll('.viewport-mode').forEach((button) => button.addEventListener('click', reportMenuState));
 api.onMenuCommand((command) => {
   const [kind, target] = command.split(':');
   if (command === 'open-file') $('btn-open').click();
@@ -790,7 +809,6 @@ api.onMenuCommand((command) => {
   else if (command === 'batch') $('btn-batch').click();
   else if (command === 'frame') viewer.frame();
   else if (command === 'light-reset') $('btn-light-reset').click();
-  else if (kind === 'mode') $(`mode-${target}`).click();
   else if (kind === 'toggle' && MENU_FLAGS.includes(target)) {
     $(target).checked = !$(target).checked;
     $(target).dispatchEvent(new Event('change'));

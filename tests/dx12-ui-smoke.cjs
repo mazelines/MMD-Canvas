@@ -76,8 +76,11 @@ app.on('browser-window-created',(_event,win)=>{
         const emission=await render({sun:0,ambient:0}),emissionAO=await render({sun:0,ambient:0,ao:1});
         check(difference(emission,emissionAO).max===0,'AO must preserve emission');
         material.emissive.setRGB(0,0,0);await api.dx12Model(nativeModel(model));
+        // Assign the built-in Default Toon stack (outline enabled) to all materials.
+        await api.dx12MaterialStacks(new Array(256).fill(1));
         const toon=await render({toon:1}),outline=await render({toon:1,outline:2});
         check(difference(toon,outline).changed>50,'Native Toon hull outline must be visible');
+        await api.dx12MaterialStacks(new Array(256).fill(0));
         const oldPose=await render({shadow:1});cube.position.x-=1;await api.dx12Pose(nativeModel(model,true));
         check(difference(oldPose,await render({shadow:1})).changed>100,'A pose update must rebuild DXR geometry and its shadow');
         for(let i=0;i<12;i++)await render({width:160+i%3});

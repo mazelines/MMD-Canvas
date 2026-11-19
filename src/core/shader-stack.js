@@ -65,23 +65,28 @@ export function parseLayer(code) {
   return { name: func ? func[1] : null, properties, errors };
 }
 
-// Assign global float4 slots across an ordered stack. Returns
-// { layers: [{ name, properties:[{...,slot}], errors }], slotCount }.
-export function parseStack(layers) {
-  let slot = 0;
+// Assign float4 slots across an ordered stack, starting at baseSlot (so multiple
+// stacks can partition the single 256-slot userParams buffer). Returns
+// { layers: [{ name, properties:[{...,slot}], errors }], slotCount, baseSlot }.
+// slotCount is the local count; absolute slots run baseSlot..baseSlot+slotCount.
+export function parseStack(layers, baseSlot = 0) {
+  let slot = baseSlot;
   const parsed = (layers || []).map(layer => {
     const info = parseLayer(layer.code);
     info.properties.forEach(p => { p.slot = slot++; });
     return { ...info, enabled: layer.enabled !== false, id: layer.id };
   });
-  return { layers: parsed, slotCount: slot };
+  return { layers: parsed, slotCount: slot - baseSlot, baseSlot };
 }
 
-// Pack parameter values into a Float32Array of float4 slots for the native buffer.
+// Pack parameter values into float4 slots for the native buffer.
 // values: { [layerId]: { [propName]: number|number[] } }; falls back to defaults.
-export function packParams(layers, values = {}) {
-  const { layers: parsed, slotCount } = parseStack(layers);
-  const data = new Float32Array(Math.max(1, slotCount) * 4);
+// baseSlot offsets this stack's slots; totalSlots sizes the (shared) buffer; out
+// optionally writes into an existing combined buffer instead of allocating.
+export function packParams(layers, values = {}, baseSlot = 0, totalSlots = null, out = null) {
+  const { layers: parsed, slotCount } = parseStack(layers, baseSlot);
+  const size = (totalSlots ?? (baseSlot + slotCount)) * 4;
+  const data = out || new Float32Array(Math.max(1, size));
   for (const layer of parsed) {
     const layerValues = values[layer.id] || {};
     for (const p of layer.properties) {
@@ -94,10 +99,20 @@ export function packParams(layers, values = {}) {
   return data;
 }
 
-// HLSL local declarations reading a layer's properties from userParams (t149).
-export function hlslDeclarations(layer) {
+// Max property-slot count across a library (the per-material stride). Each native
+// material owns STRIDE consecutive float4 slots; a stack's local slots index into
+// its material's region via the b1 `materialId` root constant.
+export function libraryStride(library) {
+  let stride = 1;
+  for (const stack of library || []) stride = Math.max(stride, parseStack(stack.layers || []).slotCount);
+  return stride;
+}
+
+// HLSL local declarations reading a layer's properties from userParams (t149),
+// indexed per material: userParams[materialId*stride + localSlot].
+export function hlslDeclarations(layer, stride = 1) {
   return layer.properties.map(p => {
-    const s = `userParams[${p.slot}]`;
+    const s = `userParams[materialId*${stride} + ${p.slot}]`;
     switch (p.type) {
       case 'int': return `    int ${p.name} = (int)${s}.x;`;
       case 'bool': return `    bool ${p.name} = ${s}.x > 0.5;`;
@@ -111,9 +126,36 @@ export function hlslDeclarations(layer) {
 
 // Inject a layer's property declarations at the top of its function body so the
 // user's code can reference the property names directly.
-export function injectDeclarations(code, layer) {
-  const decls = hlslDeclarations(layer);
+export function injectDeclarations(code, layer, stride = 1) {
+  const decls = hlslDeclarations(layer, stride);
   if (!decls) return code;
   const bodyRe = /(void\s+[A-Za-z_]\w*\s*\(\s*inout\s+ShadingContext\s+\w+\s*\)\s*\{)/;
   return code.replace(bodyRe, `$1\n${decls}\n`);
+}
+
+// Pack per-material instance values into the shared userParams buffer. panelIndices
+// maps native materialId -> panel material index; instances[panelIndex] =
+// { stackId, params:{layerId:{propName:value}} }. Each native material's region
+// starts at nativeId*stride and uses its assigned stack's local slot layout.
+export function packMaterialParams(library, instances, panelIndices, stride, nativeCount) {
+  const data = new Float32Array(Math.max(1, nativeCount * stride) * 4);
+  for (let nativeId = 0; nativeId < nativeCount; nativeId++) {
+    const panelIndex = panelIndices[nativeId];
+    const inst = instances?.[panelIndex];
+    const stackId = inst?.stackId || 0;
+    if (stackId < 1) continue;
+    const stack = library[stackId - 1]; if (!stack) continue;
+    const { layers } = parseStack(stack.layers || []);
+    const base = nativeId * stride;
+    for (const layer of layers) {
+      const values = inst?.params?.[layer.id] || {};
+      for (const p of layer.properties) {
+        const raw = values[p.name] !== undefined ? values[p.name] : p.default;
+        const off = (base + p.slot) * 4;
+        if (Array.isArray(raw)) { for (let i = 0; i < 4; i++) data[off + i] = raw[i] ?? 0; }
+        else data[off] = Number(raw) || 0;
+      }
+    }
+  }
+  return data;
 }

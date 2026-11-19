@@ -8,7 +8,7 @@ import { convertPmxFile, OUTPUT_FORMATS } from '../src/core/convert.js';
 import { readWorkspace, writeWorkspace, networkPaths } from '../src/core/workspace.js';
 import { Dx12Host } from './dx12.js';
 import { compileShaderStack } from './shader-compiler.js';
-import { packParams } from '../src/core/shader-stack.js';
+import { libraryStride } from '../src/core/shader-stack.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Three.js supplies scene/loader data only; browser 3D rendering is disabled.
@@ -94,9 +94,6 @@ function buildMenu() {
       submenu: [
         item(t('맞춰 보기'), 'frame', 'F'),
         { type: 'separator' },
-        mode('Lambert', 'lambert'),
-        mode('Toon', 'toon'),
-        { type: 'separator' },
         check(t('그리드'), 'flag-grid'),
         check(t('본'), 'flag-skeleton'),
         check(t('와이어프레임'), 'flag-wireframe'),
@@ -163,9 +160,31 @@ function createWindow() {
 }
 
 // ---------------- shader stack editor window ----------------
-// Main process owns the stack state; the editor window queries/updates it and the
-// main viewport shows the result. Compilation/hot-swap happen here.
-let shaderStack = [];
+// Main process owns a library of shader stacks and a per-material assignment.
+// stackId = library index + 1; 0 = base shading. The editor queries/updates it;
+// the main viewport renders per-material, the preview shows the selected stack.
+// Built-in standard stacks. Default Toon reproduces the MMD toon look (2-band
+// hard step + flat fill) as a stack layer on the neutral Lambert base, with the
+// hull outline enabled; Standard is the plain Lambert base. Users can edit/add.
+const BUILTIN_STACKS = [
+  { name: 'Default Toon', outline: true, layers: [{ id: 'toon', name: 'DefaultToon', enabled: true, code:
+`//@property float shadowFloor = 0.251 [0,1] "그림자 바닥"
+void DefaultToon(inout ShadingContext ctx) {
+    float band = ctx.ndl < 0 ? shadowFloor : 1.0;
+    float toonDirect = lerp(shadowFloor, band, ctx.shade);
+    ctx.color += ctx.albedo * (toonDirect - ctx.direct) * ctx.sunLux / 3.141592653589793;
+    float3 flatFill = lerp(ctx.groundColor, ctx.skyColor, 0.5) * ctx.ambientLux;
+    ctx.color += ctx.albedo * (flatFill - ctx.fill) * ctx.ao / 3.141592653589793;
+}` }] },
+  { name: 'Standard', outline: false, layers: [] },
+];
+let shaderLibrary = BUILTIN_STACKS.map(s => ({ ...s, layers: s.layers.map(l => ({ ...l })) }));
+let materialInstances = []; // panel material index -> { stackId, params:{layerId:{propName:value}} }
+let materialNames = [];     // display names pushed by the main window
+let previewMaterial = 0;    // material whose stack the editor preview sphere shows
+let stackCache = new Map(); // stackId -> { color, aa }
+let stride = 1;             // per-material userParams stride (max stack slot count)
+const previewStackId = () => materialInstances[previewMaterial]?.stackId || 0;
 function openShaderWindow() {
   if (shaderWin && !shaderWin.isDestroyed()) { shaderWin.focus(); return; }
   shaderWin = new BrowserWindow({
@@ -176,14 +195,19 @@ function openShaderWindow() {
   shaderWin.loadURL('app://ui/renderer/shader-stack.html');
   shaderWin.on('closed', () => { previewDx12.stop(); shaderWin = null; });
 }
+function shaderState() { return { library: shaderLibrary, instances: materialInstances, materialNames, stride, previewMaterial }; }
 function notifyShaderApplied() {
   // Direct render kick: reliable across the multi-window setup where the IPC
   // event alone may not restart a converged flush. Kick both viewports.
   for (const w of [win, shaderWin]) {
     if (!w || w.isDestroyed()) continue;
-    w.webContents.send('shader-stack:applied', shaderStack);
+    w.webContents.send('shader-stack:applied', shaderState());
     w.webContents.executeJavaScript('window.__shaderStackRender && window.__shaderStackRender()').catch(() => {});
   }
+}
+function broadcastShaderUpdated() {
+  if (shaderWin && !shaderWin.isDestroyed()) shaderWin.webContents.send('shader-stack:updated', shaderState());
+  if (win && !win.isDestroyed()) win.webContents.send('shader-stack:updated', shaderState());
 }
 
 app.whenReady().then(() => {
@@ -228,8 +252,8 @@ const handleHost = (channel, fn) => ipcMain.handle(channel, async (e, ...args) =
 });
 handleHost('dx12:start', async (host) => {
   const caps = await host.start();
-  // Apply any stack restored before the renderer was ready (both hosts).
-  try { await loadShaderStack(); notifyShaderApplied(); } catch { /* best-effort */ }
+  // Apply any library restored before the renderer was ready (both hosts).
+  try { await loadShaderLibrary(); notifyShaderApplied(); } catch { /* best-effort */ }
   return caps;
 });
 handleHost('dx12:model', (host, data) => host.model(data));
@@ -237,53 +261,99 @@ handleHost('dx12:pose', (host, data) => host.pose(data));
 handleHost('dx12:render', (host, data) => host.render(data));
 handleHost('dx12:shader', async (host, layers) => {
   if (!layers || !layers.length) return host.shader(null);
-  const blobs = await compileShaderStack(layers);
+  const blobs = await compileShaderStack(layers, libraryStride([{ layers }]));
   return host.shader(blobs.color, blobs.aa);
 });
 handleHost('dx12:params', (host, data) => host.setParams(data));
+handleHost('dx12:matstacks', (host, stackIds) => host.materialStacks(stackIds));
 handleHost('dx12:stop', (host) => host.stop());
 
 // Shader stack editor window: main owns the state, compiles, hot-swap, and
 // notifies the main viewport to re-render. The host mutex serializes shader loads
 // against renders; parameter uploads are fire-and-forget.
-handle('shader-stack:get', () => shaderStack);
-// Best-effort compile + hot-swap of the current stack into the running renderer.
-// Skips silently if the renderer is not up yet (applied later on dx12:start).
-async function loadShaderStack() {
-  const hosts = [dx12, previewDx12].filter(h => h.child);
+handle('shader-stack:library-get', () => shaderState());
+// Compile every library stack at the shared per-material stride, then fan out:
+// the main host gets the whole library (opcode 8, with outline flags); the preview
+// host gets the selected material's stack as its base shader (opcode 6). Per-material
+// parameter values are packed and uploaded by the renderer (nativeModel/flush).
+async function compileLibrary() {
+  stride = libraryStride(shaderLibrary);
+  const cache = new Map();
+  for (let i = 0; i < shaderLibrary.length; i++) {
+    const blobs = await compileShaderStack(shaderLibrary[i].layers || [], stride);
+    cache.set(i + 1, blobs);
+  }
+  stackCache = cache;
+}
+async function loadShaderLibrary() {
+  const hosts = [dx12, previewDx12].filter(h => h.child && h.capabilities);
   if (!hosts.length) return;
-  const active = shaderStack.filter(l => l.enabled !== false);
-  const values = Object.fromEntries(shaderStack.map(l => [l.id, l.params || {}]));
-  // Compile once, feed the same blobs to every running host (each serializes its
-  // own swap against its renders).
-  const blobs = active.length ? await compileShaderStack(shaderStack) : null;
-  const params = packParams(shaderStack, values).buffer;
+  await compileLibrary();
+  const stacks = [...stackCache].map(([stackId, b]) => ({ stackId, outline: shaderLibrary[stackId - 1]?.outline ? 1 : 0, color: b.color, aa: b.aa }));
   for (const host of hosts) {
-    if (!blobs) { await host.shader(null); continue; }
-    await host.shader(blobs.color, blobs.aa);
-    host.setParams(params);
+    if (host === previewDx12) {
+      const sel = stackCache.get(previewStackId());
+      await host.shader(sel ? sel.color : null, sel ? sel.aa : null);
+    } else {
+      await host.shaderLibrary(stacks);
+    }
   }
 }
-ipcMain.handle('shader-stack:apply', async (event, layers) => {
-  const next = Array.isArray(layers) ? layers : [];
-  // Store state first so a workspace restore persists even if the renderer is not
-  // ready yet; the load itself is best-effort and must not abort the caller.
-  shaderStack = next;
+// Best-effort load: store state first so a workspace restore persists even if the
+// renderer is not ready; the load itself must not abort the caller.
+async function applyLibrary() {
   let loadError = null;
-  try { await loadShaderStack(); } catch (e) { loadError = e.message || String(e); }
+  try { await loadShaderLibrary(); } catch (e) { loadError = e.message || String(e); }
   notifyShaderApplied();
-  // Refresh the editor only when the change came from elsewhere (e.g. workspace
-  // restore), not from the editor window's own apply.
-  const fromEditor = shaderWin && !shaderWin.isDestroyed() && event.sender === shaderWin.webContents;
-  if (!fromEditor && shaderWin && !shaderWin.isDestroyed()) shaderWin.webContents.send('shader-stack:updated', shaderStack);
-  if (loadError) return { ok: false, error: loadError };
-  return { ok: true, value: { active: next.some(l => l.enabled !== false) } };
+  return loadError;
+}
+ipcMain.handle('shader-stack:library-set', async (_e, library) => {
+  shaderLibrary = Array.isArray(library) ? library : [];
+  for (const inst of materialInstances) if (inst.stackId > shaderLibrary.length) inst.stackId = 0;
+  const err = await applyLibrary(); broadcastShaderUpdated();
+  return err ? { ok: false, error: err } : { ok: true, value: shaderState() };
 });
-handle('shader-stack:params', values => {
-  for (const l of shaderStack) if (values && values[l.id]) l.params = { ...(l.params || {}), ...values[l.id] };
-  const params = packParams(shaderStack, values || {}).buffer;
-  for (const host of [dx12, previewDx12]) if (host.child) host.setParams(params);
+ipcMain.handle('shader-stack:restore', async (_e, { library, instances }) => {
+  if (Array.isArray(library) && library.length) shaderLibrary = library;
+  materialInstances = Array.isArray(instances) ? instances.map(i => ({ stackId: (i?.stackId >= 1 && i.stackId <= shaderLibrary.length) ? i.stackId : 1, params: i?.params || {} })) : [];
+  const err = await applyLibrary(); broadcastShaderUpdated();
+  return err ? { ok: false, error: err } : { ok: true, value: shaderState() };
+});
+ipcMain.handle('shader-stack:stack-apply', async (_e, { stackId, layers, outline }) => {
+  const idx = stackId - 1;
+  if (idx < 0 || idx >= shaderLibrary.length) return { ok: false, error: 'Invalid stackId' };
+  shaderLibrary[idx].layers = Array.isArray(layers) ? layers : [];
+  if (outline !== undefined) shaderLibrary[idx].outline = !!outline;
+  const err = await applyLibrary(); broadcastShaderUpdated();
+  return err ? { ok: false, error: err } : { ok: true, value: shaderState() };
+});
+// Per-material instance property values (Unity-style material instances). The
+// renderer re-packs userParams on the next flush; no recompile needed.
+handle('shader-stack:instance-params', ({ materialIndex, values }) => {
+  const inst = materialInstances[materialIndex];
+  if (!inst) return { ok: false, error: 'Invalid material' };
+  inst.params = { ...(inst.params || {}), ...(values || {}) };
+  broadcastShaderUpdated(); notifyShaderApplied();
+  return { ok: true };
+});
+handle('shader-stack:assign', ({ materialIndex, stackId }) => {
+  if (materialIndex >= 0) materialInstances[materialIndex] = { stackId, params: materialInstances[materialIndex]?.params || {} };
+  broadcastShaderUpdated(); notifyShaderApplied();
+  return { ok: true, value: shaderState() };
+});
+handle('shader-stack:preview', async (materialIndex) => {
+  previewMaterial = materialIndex;
+  if (previewDx12.child && previewDx12.capabilities) {
+    const sel = stackCache.get(previewStackId());
+    try { await previewDx12.shader(sel ? sel.color : null, sel ? sel.aa : null); } catch { /* best-effort */ }
+  }
   notifyShaderApplied();
+  return { ok: true };
+});
+handle('shader-stack:materials', (names) => {
+  materialNames = Array.isArray(names) ? names : [];
+  while (materialInstances.length < materialNames.length) materialInstances.push({ stackId: 1, params: {} });
+  broadcastShaderUpdated();
   return { ok: true };
 });
 

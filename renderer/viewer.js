@@ -115,12 +115,10 @@ export class Viewer {
     this.requestRender();
   }
 
-  setRenderMode(mode) {
-    if (!['lambert', 'toon'].includes(mode)) return;
-    this.renderMode = mode;
-    if (this.current) {
-      this.current.shading.apply(mode);
-    }
+  // Shading look is per-material shader stacks now; the base is always Lambert.
+  setRenderMode() {
+    this.renderMode = 'lambert';
+    if (this.current) this.current.shading.apply();
     this.setLightIntensity(this.lightLevel);
     this.invalidateShadows();
     this.onMaterialsChanged?.();
@@ -305,7 +303,7 @@ export class Viewer {
     loaded.materials = collectMaterials(loaded.object);
     loaded.info.materialNames = loaded.materials.map((entry) => entry.name);
     loaded.shading = new ViewportShading(loaded.object, new THREE.Vector2(this.container.clientWidth || 1, this.container.clientHeight || 1), this.outlineSettings);
-    loaded.shading.apply(this.renderMode);
+    loaded.shading.apply();
     this.root.add(loaded.object);
     const clips = playableClips(loaded.clips);
     if (clips.length) {

@@ -114,6 +114,11 @@ int main(int argc, char** argv) {
                     catch(const std::exception&e){std::cout<<"{\"type\":\"shader\",\"ok\":false,\"error\":"<<::quoted(e.what())<<"}"<<std::endl;}
                 }
                 else if(header[0]==7){renderer.setParams(payload);std::cout<<"{\"type\":\"params\"}"<<std::endl;}
+                else if(header[0]==8){
+                    try{renderer.loadShaderLibrary(payload);std::cout<<"{\"type\":\"shaderlib\",\"ok\":true}"<<std::endl;}
+                    catch(const std::exception&e){std::cout<<"{\"type\":\"shaderlib\",\"ok\":false,\"error\":"<<::quoted(e.what())<<"}"<<std::endl;}
+                }
+                else if(header[0]==9){renderer.setMaterialStacks(payload);std::cout<<"{\"type\":\"matstacks\",\"ok\":true}"<<std::endl;}
                 else if(header[0]==4)break;
                 else if(header[0]!=3)throw std::runtime_error("Unknown native command");
             }

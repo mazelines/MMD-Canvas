@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { gt7InverseDisplay } from './gt7-tonemapping.js';
 import { nativeTexture } from './native-textures.js';
+import { packMaterialParams } from '../src/core/shader-stack.js';
 
 function bytes(array) { return new Uint8Array(array.buffer, array.byteOffset, array.byteLength); }
 function join(parts) {
@@ -8,7 +9,10 @@ function join(parts) {
   for (const p of parts) { out.set(bytes(p), at); at += p.byteLength; } return out.buffer;
 }
 /** Export the currently posed scene, preserving loader/material ownership in the editor. */
-export function nativeModel(object, poseOnly = false) {
+// materialAssign (panel material index -> stackId) + stackIdsOut (filled parallel
+// to native material records) enable per-material shader stacks. Default callers
+// pass neither and get the plain model packet as before.
+export function nativeModel(object, poseOnly = false, materialAssign = null, stackIdsOut = null, panelIndicesOut = null) {
   object.updateMatrixWorld(true);
   const vertices = [], triangles = [], records = [], textures = [], materialIds = new Map(), textureIds = new Map();
   const textureId = texture => {
@@ -18,10 +22,12 @@ export function nativeModel(object, poseOnly = false) {
     if (textures.length >= 128) throw new Error('DX12 뷰포트는 현재 텍스처 128개까지 지원합니다.');
     const id = textures.length; image.srgb=texture.colorSpace===THREE.SRGBColorSpace; textures.push(image); textureIds.set(texture, id); return id;
   };
-  const materialId = m => {
+  const materialId = (m, panelIndex = 0) => {
     if (materialIds.has(m)) return materialIds.get(m);
     if(m.displacementMap || (m.normalMap && m.normalMapType===THREE.ObjectSpaceNormalMap)) throw new Error('DX12에서 아직 지원하지 않는 재질입니다: 변위·Object-space Normal.');
     const id = records.length, buffer = new ArrayBuffer(128), f = new Float32Array(buffer), u = new Int32Array(buffer);
+    if (stackIdsOut) stackIdsOut[id] = materialAssign?.[panelIndex] ?? 0;
+    if (panelIndicesOut) panelIndicesOut[id] = panelIndex;
     f.set([m.color?.r ?? 1, m.color?.g ?? 1, m.color?.b ?? 1, m.opacity ?? 1]);
     f.set([m.emissive?.r * (m.emissiveIntensity ?? 1) || 0, m.emissive?.g * (m.emissiveIntensity ?? 1) || 0, m.emissive?.b * (m.emissiveIntensity ?? 1) || 0, 0], 4);
     u.set([textureId(m.map), textureId(m.alphaMap), textureId(m.emissiveMap), textureId(m.aoMap)], 8);
@@ -74,7 +80,7 @@ export function nativeModel(object, poseOnly = false) {
     for (const group of groups) {
       const m = mats[group.materialIndex]; if (!m || !m.visible || m.opacity <= 0) continue;
       if(m.isShaderMaterial)throw new Error('사용자 GLSL 셰이더는 DX12에서 지원하지 않습니다.');
-      const mat = materialId(m), start = Math.max(group.start, geometry.drawRange.start);
+      const mat = materialId(m, group.materialIndex), start = Math.max(group.start, geometry.drawRange.start);
       const end = Math.min(group.start + group.count, geometry.drawRange.start + geometry.drawRange.count, geometry.index?.count ?? position.count);
       for (let i = start; i + 2 < end; i += 3) triangles.push(base + (geometry.index?.getX(i) ?? i), base + (geometry.index?.getX(i+1) ?? i+1), base + (geometry.index?.getX(i+2) ?? i+2), mat);
     }
@@ -83,7 +89,7 @@ export function nativeModel(object, poseOnly = false) {
   // Empty/hidden scenes still render their background and grid with DX12.
   if (!triangles.length) {
     if (!vertices.length) vertices.push(0,0,0,0,1,0,0,0);
-    triangles.push(0,0,0,materialId(new THREE.MeshLambertMaterial({opacity:0,transparent:true})));
+    triangles.push(0,0,0,materialId(new THREE.MeshLambertMaterial({opacity:0,transparent:true}), 0));
   }
   const parts = [new Uint32Array([vertices.length/8,triangles.length/4,records.length,textures.length]), new Float32Array(vertices),new Uint32Array(triangles),...records];
   for (const t of textures) {
@@ -96,6 +102,9 @@ export function nativeModel(object, poseOnly = false) {
 export class Dx12Viewport {
   constructor(viewer, status) {
     this.viewer = viewer; this.status = status; this.enabled = false; this.busy = false; this.dirty = false; this.loadedKey = ''; this.id = 0; this.shadowSamples = 4;
+    this.materialAssign = []; // panel material index -> shader stackId (synced from main)
+    this.library = []; this.instances = []; this.stride = 1; // per-material shader state (synced from main)
+    this.panelIndices = []; this.loadedParamKey = '';
     const savedAA=Number(localStorage.getItem('viewportAA')??1);this.aaMode=[0,1,2,3].includes(savedAA)?savedAA:1;
     // Use a mild default; stored choices always win over the default.
     const savedSharpen=Number(localStorage.getItem('viewportSharpen')??25);this.sharpen=Number.isFinite(savedSharpen)?Math.min(100,Math.max(0,Math.round(savedSharpen))):25;
@@ -137,6 +146,7 @@ export class Dx12Viewport {
   get object() { return this.viewer.current?.object || this.empty; }
   sceneKey(pose = false) {
     const v=this.viewer, values=[this.object.uuid]; if(pose)values.push(v.nativeRevision || 0);
+    else values.push(JSON.stringify(this.materialAssign || []));
     this.object.traverseVisible(o => {
       if (!o.isMesh || o.userData.viewportOutline) return;
       values.push(o.uuid, o.geometry.attributes.position.count, o.geometry.index?.count, o.geometry.index?.version);
@@ -162,7 +172,7 @@ export class Dx12Viewport {
     f.set([...v.hemi.color.toArray(),v.ambientLevel],36);f.set([...v.hemi.groundColor.toArray(),0],40);
     const ratio=Math.min(window.devicePixelRatio,2),size=new THREE.Vector2(Math.max(1,Math.round(v.container.clientWidth*ratio)),Math.max(1,Math.round(v.container.clientHeight*ratio))); const scale=Math.min(1,2048/Math.max(size.x,size.y));
     f.set([Math.max(1,Math.round(size.x*scale)),Math.max(1,Math.round(size.y*scale)),v.shadow.softness,v.cortao.modelSize*v.cortao.settings.radius/100],44);
-    f.set([v.exposureMultiplier,v.renderMode==='toon'?1:0,v.shadow.enabled?1:0,v.cortao.settings.enabled&&!v.flags.wireframe?1:0],48);
+    f.set([v.exposureMultiplier,0,v.shadow.enabled?1:0,v.cortao.settings.enabled&&!v.flags.wireframe?1:0],48);
     f.set([v.cortao.settings.intensity,v.cortao.debugView==='raw'?2:v.cortao.debugView==='ao'?1:0,this.shadowSamples,v.flags.wireframe?1:0],52);
     f.set([...v.scene.background.toArray(),v.flags.grid?1:0],56);f.set([v.shadow.groundY,10,v.cortao.modelSize,v.outlineSettings.width],60);
     f[63] *= size.x * scale / v.container.clientWidth;
@@ -213,8 +223,10 @@ export class Dx12Viewport {
         this.dirty=false;this.canvas.hidden=false; this.object.updateMatrixWorld(true);
         const key=this.sceneKey();
         const poseKey=this.sceneKey(true);
-        if(key!==this.loadedKey) { await window.api.dx12Model(nativeModel(this.object)); this.loadedKey=key;this.loadedPoseKey=poseKey; }
+        if(key!==this.loadedKey) { const stackIds=[],panelIndices=[]; await window.api.dx12Model(nativeModel(this.object,false,this.materialAssign,stackIds,panelIndices)); await window.api.dx12MaterialStacks(stackIds); this.panelIndices=panelIndices; this.loadedKey=key;this.loadedPoseKey=poseKey;this.loadedParamKey=''; }
         else if(poseKey!==this.loadedPoseKey) { await window.api.dx12Pose(nativeModel(this.object,true));this.loadedPoseKey=poseKey; }
+        const paramKey=JSON.stringify(this.instances);
+        if(paramKey!==this.loadedParamKey && this.panelIndices.length) { const pd=packMaterialParams(this.library,this.instances,this.panelIndices,this.stride,this.panelIndices.length); await window.api.dx12Params(pd.buffer); this.loadedParamKey=paramKey; }
         const result=await window.api.dx12Render(this.frame());
         this.lastFrame=result;this.status.textContent=`DX12 Ultimate · ${result.antialiasing||'MSAA 4x'} · ${result.renderMs.toFixed(1)} ms`;
         // Finish temporal convergence even when the camera/model becomes still.

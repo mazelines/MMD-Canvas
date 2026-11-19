@@ -10,6 +10,10 @@ A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
 
+## v0.7.0: Unity-style per-material shader system
+
+Redesign the shader system Unity-style: **assign a different shader to each material**, and keep **property values independent per material** even when the same shader is shared. The global viewport Lambert/Toon shading modes are removed; shading is decided by per-material stack assignment. Two built-in stacks are provided: **Default Toon** (with outlines), reproducing the MMD standard toon look, and **Standard**, the neutral Lambert base. New materials default to Default Toon. In the shader stack editor, select a material to assign a stack and edit that material's own property values; the center sphere preview shows the selected material's shader. A shared per-stack DXIL separates material instances via `materialId*STRIDE` runtime indexing, and outlines toggle per material through each stack's flag. [Structure and syntax](shader-stack.md) · [0.7.0 release notes](release-notes/v0.7.0.md).
+
 ## v0.6.1: depth-based rim light (DepthRimLight)
 
 Add a DepthRimLight example function inspired by the depth-based rim light technique used in miHoYo-style subculture games. Instead of fresnel, it samples neighbor scene depth along the light direction to detect silhouettes (depth discontinuities) and apply a rim. Adds a screen-space depth sampling helper (sampleSceneDepth) plus viewportSize/lightDirScreen context fields to the shader stack. Tune width, depth threshold, fade, intensity, and color via properties. [Structure and syntax](shader-stack.md) · [0.6.1 release notes](release-notes/v0.6.1.md).
@@ -99,7 +103,7 @@ v0.3.0 adds workspace saving/restoring and a four-language UI. Toon now uses two
 
 The app follows the system language at startup: **Korean, English, Simplified Chinese, or Japanese**, with English as the fallback. Model names, descriptions, and filenames remain unchanged.
 
-Use the workspace bar to open, save, or save as a `.canvas` file. It restores the model and folder, camera, lighting, shading and outlines, material visibility, morphs, and conversion options/output paths. Folder-only batch workspaces are supported. Opening a workspace does not start conversion.
+Use the workspace bar to open, save, or save as a `.canvas` file. It restores the model and folder, camera, lighting, per-material shaders and outlines, material visibility, morphs, and conversion options/output paths. Folder-only batch workspaces are supported. Opening a workspace does not start conversion.
 
 Shortcuts: `Ctrl+S` to save, `Ctrl+Shift+S` to save as, and `Ctrl+Shift+O` to open. You can also open `.canvas` files by drag and drop or as a startup argument. Assets are referenced, not embedded; preserve their relative folder structure when moving a workspace. Language is determined by the receiving system, not the workspace.
 
@@ -112,8 +116,8 @@ Run `npm run test:workspace` after `npm test` to verify saving/restoring and all
 - **Physical directional light:** illuminance in lux, default 10 lux; numeric range 0–200,000. Lambert uses reflectance × lux × cosine × shadow visibility / π. Double-click the slider to reset to 10 lux. No hidden fill light or mode-dependent intensity multiplier.
 - **File browser:** browse drives and folders, filter by filename or 3D format, navigate with the keyboard, and drag and drop files.
 - **3D viewer:** orbit, pan, zoom, frame the model, toggle grid/bones/wireframe, and control material visibility.
-- **Rendering modes:** standard Lambert shading and two-tone Toon shading with adjustable outlines.
-- **Toon outlines:** the native DX12 hull pass uses the posed surface normals, with adjustable width and color.
+- **Per-material shaders:** assign a shader (stack) to each material, Unity-style, with property values independent per material. Built-in Default Toon (two lighting tones and outlines) and Standard (neutral Lambert) are provided; add and assign user stacks in the shader stack editor.
+- **Outlines:** the DX12 hull pass draws outlines, toggled per material via each stack's flag (enabled for Default Toon). It honors the global width and color settings, follows skinning and morphs, and uses the original surface normals.
 - **Animation playback:** when a loaded model carries animation clips (FBX, glTF/GLB, DAE, USD), a transport bar appears at the bottom of the viewport and playback starts. It offers play/pause, back to start, clip selection, timeline scrubbing, speed (0.25–2×), and looping; shadows and toon outlines follow the motion. PMX files contain no animation, so the bar stays hidden for them, and loading VMD motions is not supported.
 - **PMX inspection:** vertex, triangle, material, bone, morph, and texture counts; model descriptions and conversion warnings; vertex morph sliders and reset.
 - **Material inspector:** search material/mesh names; inspect color, opacity, roughness, metalness, texture previews, resolution, UV data, material slots, and triangle counts. View original PMX values separately. Toggle individual materials, isolate the selection, or show all, including on non-PMX models. Visibility changes affect previews only.
@@ -121,35 +125,42 @@ Run `npm run test:workspace` after `npm test` to verify saving/restoring and all
 - **Light gizmo:** translation, rotation, Local/World coordinates, and direction reset. Lighting, shadow, direction, and coordinate-space preferences are saved.
 - **Conversion:** single PMX files or entire folders, optional recursion, scale/name/morph/texture-copy options, and opening the output folder.
 
-## Standard / simple Toon rendering
+## Per-material shading
 
-Use the **Lambert / Toon** sphere buttons at the top right of the viewport.
+All materials composite lighting, transparency, and shadows in Linear Rec.709 space, with GT7 SDR tone mapping and one sRGB output conversion applied at the end. [Color space and GT7](color-pipeline.md).
 
-| Mode | Appearance | Useful for |
+Directional illuminance is in **lux**, defaulting to **10 lux**. Enter 0–200,000 lux numerically and double-click the slider to reset to 10 lux. The neutral Lambert base computes luminance as `reflectance × lux × max(N·L, 0) × shadow visibility / π`. No hidden fill light or intensity multiplier is applied.
+
+Adjust **EV100 and exposure compensation** in the left viewport panel (defaults 0 / 0); +1 EV100 halves brightness, +1 compensation doubles it. The material inspector's **emission reference luminance** (cd/m²) is composited in the same units as direct light before exposure and GT7 are applied. Exposure and per-material emission settings persist in `.canvas`; original materials and conversion results remain intact.
+
+v0.7.0 removes the global Lambert/Toon mode buttons and switches to **per-material shader assignment**. Each material uses one built-in or user stack, and materials sharing the same stack still keep independent property values.
+
+| Built-in stack | Appearance | Useful for |
 | --- | --- | --- |
-| **Standard · Lambert** | Smooth lighting without Toon outlines; the default mode. | Inspecting shape, textures, and lighting |
-| **Simple Toon** | Two lighting tones and silhouette outlines. | Previewing cel shading and character silhouettes |
+| **Default Toon** | Two lighting tones and silhouette outlines (the MMD standard toon look); the default assignment for new materials. | Previewing cel shading and character silhouettes |
+| **Standard** | Smooth, neutral Lambert shading without outlines. | Inspecting shape, textures, and lighting |
 
-Toon cast shadows share the unlit face's dark tone instead of darkening it again. Hemisphere fill is controlled by the ambient lux setting. Soft DXR shadow edges interpolate between the two tones; source texture, emission, and AO variations remain visible.
+Default Toon cast shadows share the unlit face's dark tone instead of darkening it again. Hemisphere fill is controlled by the ambient lux setting. Soft DXR shadow edges interpolate between the two tones; source texture, emission, and AO variations remain visible.
 
-![Simple Toon rendering with lux lighting, EV100 exposure, outlines, and workspace controls](images/mmd-canvas-toon-preview.png)
+![Toon rendering in MMD Canvas with lux lighting, EV100 exposure, outline settings, and the workspace view](images/mmd-canvas-toon-preview.png)
 
-Selecting Toon reveals outline controls below the buttons:
+**Outline settings** are always visible in the viewport (width and color are global settings).
 
-- **Width:** slider or numeric input, 0–8px; default 1.6px. Setting 0px hides outlines while retaining Toon shading.
-- **Color:** choose a color; default `#151923`.
-- **Reset:** the outline panel's ↺ button restores the default width and color.
-- **Persistence:** the mode and outline settings are restored on the next launch.
+- **Width:** slider or numeric input, 0–8px; default 1.6px. Setting 0px hides outlines while retaining the shading.
+- **Color:** choose a color with the color picker; default `#151923`.
+- **Reset:** the ↺ button in the outline settings restores the default width and color.
+- **Per-material display:** outlines are drawn only for materials whose assigned stack has the flag enabled (on for Default Toon, off for Standard).
+- **Persistence:** outline settings and per-material shader assignments and property values are restored on the next launch.
 
-These modes affect viewport previews only. They do not replace original material data or turn FBX/USD exports into Toon materials. Simple Toon does not fully reproduce original MMD toon/sphere materials; custom GLSL shader materials are not supported.
+Shader assignments affect viewport previews only. They do not change original material data or FBX/USD conversion results. Default Toon does not fully reproduce original MMD toon/sphere materials; custom shaders are written as native DX12 shader stacks (HLSL). [Shader stack structure and syntax](shader-stack.md).
 
-> Rendering modes and the material inspector are available from `v0.2.0`.
+> The material inspector is available from `v0.2.0`, and the per-material shader system from `v0.7.0`.
 
 ## CORTAO contact shading
 
 Under **CORTAO → Debug View**, `AO only` shows filtered, intensity-adjusted visibility; `Raw AO` shows the calculation before filtering and intensity. Black is occluded, white is open, and the background is gray. Lighting, textures, and exposure do not affect these views. Choose `Normal rendering` to return. Debug selection is not saved in workspaces. When CORTAO is off, the model appears white and a message explains why.
 
-Both Lambert and Toon share the viewport's **CORTAO** controls: enabled, intensity (0–2), and radius (0.1–10% of model size). Defaults are on / 1 / 2%. CORTAO occludes ambient light in creases and contact areas; it has no effect at 0 lux ambient. Direct lighting, emission, and outlines keep their appearance.
+The viewport's **CORTAO** controls set enabled, intensity (0–2), and radius (0.1–10% of model size). Defaults are on / 1 / 2%. CORTAO occludes ambient light in creases and contact areas; it has no effect at 0 lux ambient. Direct lighting, emission, and outlines keep their appearance.
 
 Daniel Isheden's CORTAO 1.0.3 HLSL runs at full resolution, with 32 samples / 32 rays. It follows camera, morph, and animation changes; off-screen geometry cannot occlude the model. Settings persist between sessions and in `.canvas`. Existing GTAO settings migrate to CORTAO; workspaces with no AO settings open with it disabled. Wireframe skips CORTAO. [Implementation and license](../renderer/vendor/cortao/README.md)
 
@@ -232,7 +243,7 @@ node cli.js --help
 
 ```bash
 npm test                            # Conversion, shadow, material, and shading tests
-npm run test:ui                     # Run after npm test: PMX/FBX material and Toon UI checks
+npm run test:ui                     # Run after npm test: PMX/FBX material UI checks
 npm run test:workspace              # Workspace + ko/en/zh/ja + English fallback
 node tests/run-tests.js --blender    # Additional import validation with Blender installed
 node tests/make-heavy.js             # Dense OBJ for shadow performance checks
@@ -258,7 +269,7 @@ Built with JavaScript (ES modules), Electron, three.js, and HTML/CSS. Blender im
 ```text
 src/core/             PMX parser, scene normalization, FBX/USD writers, conversion pipeline
 electron/             Main process, preload, file access, IPC
-renderer/             Browser, viewer, DXR shadows, light gizmo, materials, Toon shading
+renderer/             Browser, viewer, DXR shadows, light gizmo, materials, shading
 cli.js                Command-line converter
 tests/                PMX/OBJ generators, core/UI tests, Blender validation
 .github/workflows/    CI and release automation

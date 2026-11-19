@@ -232,9 +232,9 @@ void baseShading(Varying v, bool front, uint primitive, inout ShadingContext ctx
             shade = temporalInfo.w != 0 ? traceShadow(surface.origin,surface.normal,v.position.xy).x : shadowVisibility(surface.origin, surface.normal, v.position.xy);
         }
     }
-    float band = settings.y > 0 ? (ndl * 0.5 + 0.5 < 0.5 ? 64.0/255.0 : 1) : max(ndl, 0);
-    float direct = settings.y > 0 ? lerp(64.0/255.0, band, shade) : band * shade;
-    float3 fill = lerp(ground.rgb, sky.rgb, settings.y > 0 ? 0.5 : n.y * 0.5 + 0.5) * sky.w;
+    // Neutral Lambert base; toon/stylized looks are shader stacks (e.g. Default Toon).
+    float direct = max(ndl, 0) * shade;
+    float3 fill = lerp(ground.rgb, sky.rgb, n.y * 0.5 + 0.5) * sky.w;
     float screenAO = visibilityAt(int2(v.position.xy));
     float materialAO = saturate(1 + (imageSample(m.maps.w, uv).r - 1) * m.options.w);
     float3 base=imageSurface(m.maps.x,uv).rgb,emissive=imageSurface(m.maps.z,uv).rgb;
@@ -247,6 +247,7 @@ void baseShading(Varying v, bool front, uint primitive, inout ShadingContext ctx
     ctx.albedo = albedo; ctx.emission = emission; ctx.alpha = alpha; ctx.materialColor = m.color.rgb;
     ctx.ndl = ndl; ctx.direct = direct; ctx.shade = shade; ctx.fill = fill; ctx.ao = min(materialAO, screenAO);
     ctx.sunDir = normalize(sun.xyz); ctx.sunLux = sun.w; ctx.skyColor = sky.rgb; ctx.groundColor = ground.rgb;
+    ctx.ambientLux = sky.w; ctx.materialId = materialId;
     ctx.viewportSize = viewport.xy;
     ctx.lightDirScreen = mul((float3x3)view, ctx.sunDir).xy * float2(0.5, -0.5);
     ctx.color = lit;
