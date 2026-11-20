@@ -63,6 +63,6 @@ NVIDIA SDK는 프로젝트 MIT 라이선스와 별도 조건을 따른다. SDK �
 
 현재 배포물은 인증서 없는 Windows 빌드이다. Windows 코드 서명은 별도 인증서와 계정 설정이 필요하다. OS 보안 정책에 따라 실행이 제한될 수 있다.
 
-앱 내 자동 업데이트 기능은 구현되어 있지 않다. 새 버전은 GitHub Releases에서 다운로드해 설치한다. 릴리스 게시에는 작업에 한정된 `GITHUB_TOKEN`을 사용하므로 별도 개인 토큰은 필요 없다.
+v0.8.2부터 시작 시와 실행 중 6시간마다 GitHub의 최신 정식 릴리스를 확인한다. 설치된 버전보다 높으면 다운로드 알림을 표시하며, 닫은 버전은 PC에 기억한다. 네트워크 오류·시간 초과·API 제한은 조용히 처리한다. 다운로드 버튼으로 공식 GitHub Release를 열어 직접 설치하며 자동 다운로드·설치는 하지 않는다. 릴리스 게시에는 작업에 한정된 `GITHUB_TOKEN`을 사용하므로 별도 개인 토큰은 필요 없다.
 
 참고: [electron-builder 설정](https://www.electron.build/docs/configuration/), [GitHub Actions 아티팩트](https://github.com/actions/upload-artifact).

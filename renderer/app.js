@@ -879,3 +879,31 @@ reportMenuState();
   await navigate(last || start.home);
   if (!state.dir) await navigate(start.home);
 })();
+
+// First-run GitHub star suggestion: a dismissible banner shown once per install,
+// plus a permanent star button on the empty welcome screen.
+const REPO_URL = 'https://github.com/mazelines/MMD-Canvas';
+const starBanner = $('star-banner');
+const dismissStar = () => { starBanner.hidden = true; localStorage.setItem('starBannerDismissed', '1'); };
+if (localStorage.getItem('starBannerDismissed') !== '1') starBanner.hidden = false;
+$('star-give').addEventListener('click', () => { api.openExternal(REPO_URL).catch(() => {}); dismissStar(); });
+$('star-dismiss').addEventListener('click', dismissStar);
+$('hint-star-give').addEventListener('click', () => { api.openExternal(REPO_URL).catch(() => {}); });
+
+let availableUpdate = null;
+const showUpdate = update => {
+  availableUpdate = update;
+  $('update-banner').hidden = !update || localStorage.getItem('updateDismissedVersion') === update.version;
+  if (update) $('update-message').textContent = t`MMD Canvas ${update.version} 버전을 사용할 수 있습니다.`;
+};
+// Subscribe first so a check completing while the renderer starts is not lost.
+let updateEventReceived = false;
+api.onUpdate(update => { updateEventReceived = true; showUpdate(update); });
+void api.getUpdate().then(update => { if (!updateEventReceived) showUpdate(update); }).catch(() => {});
+$('update-download').addEventListener('click', () => {
+  if (availableUpdate) void api.openExternal(availableUpdate.url).catch(() => {});
+});
+$('update-dismiss').addEventListener('click', () => {
+  if (availableUpdate) localStorage.setItem('updateDismissedVersion', availableUpdate.version);
+  $('update-banner').hidden = true;
+});

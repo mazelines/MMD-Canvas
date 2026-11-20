@@ -10,6 +10,12 @@ A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
 
+## v0.8.2: Update notifications and DepthRim fixes
+
+The app checks for new stable releases at startup and every six hours, with a dismissible download notification. Dismissal is remembered for that version and network failures stay silent. A dismissible GitHub star suggestion appears on first launch.
+
+DepthRimLight was checked against JTRP: signed depth comparison prevents false rims against foreground occluders, and width now scales linearly with screen resolution. Sampling follows the sun direction. All 23 bundled example materials share the same rim settings. [0.8.2 changes](release-notes/v0.8.2.md) · [Shader details (Korean)](shader-stack.md).
+
 ## v0.8.0: .shader asset management and authoring/assignment separation
 
 Manage shaders as **`.shader` data container** files (metadata + Function Stack layers). `.canvas` does not embed shader code; it stores only **relative-path references recording which `.shader` each material uses**. Place `.shader` files in a `shaders/` folder under the model directory and they are managed and restored by relative path, just like models and textures.

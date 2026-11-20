@@ -13,19 +13,7 @@ void RimLight(inout ShadingContext ctx) {
     float rim = pow(1 - saturate(dot(ctx.normal, ctx.viewDir)), 3);
     ctx.color += tint * rim * strength;
 }`;
-const DEPTH_RIM=`//@property float width = 1.0 [0,3] "림 폭"
-//@property float bias = 0.1 [0,1] "깊이 임계값"
-//@property float fade = 0.3 [0.01,1] "전이 폭"
-//@property float intensity = 1.0 [0,2] "강도"
-//@property float3 rimColor = (1,1,1) "림 색상"
-void DepthRimLight(inout ShadingContext ctx) {
-    float2 offsetBase = ctx.lightDirScreen / max(ctx.depth, 0.001);
-    float2 offsetUV = offsetBase * (3.0 * width) * (width * width);
-    float neighborDepth = sampleSceneDepth(ctx.pixel + offsetUV * ctx.viewportSize);
-    float rel = abs(neighborDepth - ctx.depth) / max(ctx.depth, 0.001);
-    float mask = saturate((rel - bias) / max(fade, 1e-5));
-    ctx.color += rimColor * mask * intensity;
-}`;
+const DEPTH_RIM=JSON.parse(fs.readFileSync(path.resolve('Example/Zhuang Fangyi/shaders/Default_Toon.shader'),'utf8')).layers.find(layer=>layer.name==='DepthRimLight').code;
 app.on('browser-window-created',(_event,win)=>win.webContents.once('did-finish-load',async()=>{
   try {
     await win.webContents.executeJavaScript(`(async()=>{

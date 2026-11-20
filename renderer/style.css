@@ -203,6 +203,16 @@ aside { background: var(--panel); min-height: 0; display: flex; flex-direction: 
 #empty-hint { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 6px; color: var(--muted); pointer-events: none; }
 .hint-title { font-size: 18px; color: var(--text); }
 .hint-sub { font-size: 12px; margin-top: 6px; letter-spacing: .3px; }
+.hint-star { pointer-events: auto; margin-top: 12px; }
+.star-give { background: #2d4668; color: #dcecff; border: 1px solid #5b95df; border-radius: 6px; padding: 5px 12px; font-size: 12px; cursor: pointer; }
+.star-give:hover { background: #345277; }
+.viewport-notices { position: absolute; top: 12px; left: 12px; right: 12px; z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
+.star-banner { display: flex; align-items: center; gap: 10px; max-width: 100%; box-sizing: border-box; background: #191e27f2; border: 1px solid #454e5e; border-radius: 8px; padding: 8px 12px; box-shadow: 0 3px 12px #0004; pointer-events: auto; }
+.star-banner button { flex-shrink: 0; }
+.update-banner { border-color: #5b95df; }
+.star-banner-text { font-size: 12px; color: var(--text); }
+.star-dismiss { background: transparent; border: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 2px 4px; }
+.star-dismiss:hover { color: var(--text); }
 #loading { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); background: rgba(20, 22, 28, .9); border: 1px solid var(--line); border-radius: 14px; padding: 4px 14px; }
 #viewport-error { position: absolute; left: 14px; right: 14px; bottom: 14px; background: rgba(60, 22, 22, .92); border: 1px solid #7a3434; color: #ffc9c9; border-radius: 6px; padding: 8px 12px; user-select: text; }
 .animation-bar { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 6px 10px; border: 1px solid #454e5e; border-radius: 7px; background: #191e27ed; box-shadow: 0 3px 12px #0003; font-size: 12px; }

@@ -10,6 +10,12 @@
 
 [下载](https://github.com/mazelines/MMD-Canvas/releases) · [CI 结果](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [发布指南（韩语）](releases.md)
 
+## v0.8.2：更新通知与 DepthRim 修复
+
+应用启动时及运行期间每六小时检查正式版本，通过可关闭的通知提供下载链接。已关闭的版本不会再次提示，网络故障不会打断工作。首次启动还会显示可关闭的 GitHub 点星提示。
+
+对照 JTRP 源码修正了 DepthRimLight：使用有符号深度差，避免前景遮挡物产生错误边缘光；宽度按屏幕分辨率线性调整，采样沿太阳方向进行。内置示例的 23 个材质统一使用相同的边缘光设置。[0.8.2 更新内容](release-notes/v0.8.2.md) · [着色器说明（韩语）](shader-stack.md)。
+
 ## v0.8.0：.shader 资产管理与制作/指定分离
 
 着色器以 **`.shader` 数据容器**（元数据 + Function Stack 层）文件的形式管理。`.canvas` 不嵌入着色器代码，只保存**哪个 `.shader` 用于哪个材质的相对路径引用**。将 `.shader` 放在模型目录下的 `shaders/` 文件夹中，即可像模型和纹理一样以相对路径管理和恢复。

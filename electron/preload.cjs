@@ -65,6 +65,8 @@ contextBridge.exposeInMainWorld('api', {
   shaderDirty: () => call('shader:dirty'),
   dx12Stop: () => call('dx12:stop'),
   startup: () => call('app:startup'),
+  getUpdate: () => call('app:update'),
+  onUpdate: (fn) => ipcRenderer.on('app:update', (_event, update) => fn(update)),
   list: (dir) => call('fs:list', dir),
   drives: () => call('fs:drives'),
   stat: (p) => call('fs:stat', p),
@@ -80,6 +82,7 @@ contextBridge.exposeInMainWorld('api', {
   convertBatch: (dir, outDir, format, recursive, options) => call('convert:batch', dir, outDir, format, recursive, options),
   onConvertProgress: (fn) => ipcRenderer.on('convert:progress', (_e, p) => fn(p)),
   reveal: (p) => call('shell:reveal', p),
+  openExternal: (url) => call('shell:openExternal', url),
   pathForFile: (file) => webUtils.getPathForFile(file),
   notifyLoaded: (info) => ipcRenderer.send('viewer:loaded', info),
 });

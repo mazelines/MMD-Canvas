@@ -22,6 +22,7 @@ import { registerAnimationTests } from './animation-tests.js';
 import { registerNativeRendererTests } from './native-renderer-tests.js';
 import { registerShaderStackTests } from './shader-stack-tests.js';
 import { registerShaderFileTests } from './shader-file-tests.js';
+import { registerUpdateTests } from './update-tests.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 setLanguage('ko'); // Core diagnostics are asserted independently of the host locale.
@@ -38,6 +39,7 @@ function test(name, fn) {
   });
 }
 registerNativeRendererTests(test);
+registerUpdateTests(test);
 
 /** Minimal binary FBX reader: validates node framing and returns the node tree. */
 function readFbx(buf) {

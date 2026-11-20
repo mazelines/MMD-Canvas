@@ -20,7 +20,7 @@ app.on('browser-window-created',(_event,win)=>{
         if(document.getElementById('renderer-backend')||__viewer.renderer)throw new Error('A browser renderer must not remain');
         const THREE=await import('three');if(THREE.WebGLRenderer)throw new Error('The browser renderer bundle must not load');
         window.__dx12TestBackground=__viewer.scene.background.clone();__viewer.scene.background.setRGB(0,1,0);
-        for(const e of document.querySelectorAll('.viewport-modes,.exposure-controls'))e.style.visibility='hidden';
+        for(const e of document.querySelectorAll('.viewport-modes,.exposure-controls,.viewport-notices'))e.style.visibility='hidden';
       })()`);
       for(let cycle=0;cycle<3;cycle++)for(const debug of ['off','ao']){
         const rect=await win.webContents.executeJavaScript(`(async()=>{
@@ -35,7 +35,7 @@ app.on('browser-window-created',(_event,win)=>{
         if(debug==='ao'&&colored!==0)throw new Error(`AO compositor retained ${colored} colored pixels (cycle ${cycle})`);
         if(debug==='off'&&colored<100)throw new Error('Normal compositor did not display the green background');
       }
-      await win.webContents.executeJavaScript(`__viewer.scene.background.copy(window.__dx12TestBackground);__viewer.setCortaoDebug('off');for(const e of document.querySelectorAll('.viewport-modes,.exposure-controls'))e.style.visibility='';`);
+      await win.webContents.executeJavaScript(`__viewer.scene.background.copy(window.__dx12TestBackground);__viewer.setCortaoDebug('off');for(const e of document.querySelectorAll('.viewport-modes,.exposure-controls,.viewport-notices'))e.style.visibility='';`);
       const result=await win.webContents.executeJavaScript(`(async()=>{
         const check=(ok,message)=>{if(!ok)throw new Error(message)};
         const wait=async f=>{for(let i=0;i<1000;i++){if(f())return;const status=document.getElementById('renderer-status').textContent;if(status.startsWith('DX12:'))throw new Error(status);await new Promise(r=>setTimeout(r,25))}throw new Error('DX12 wait timed out: '+document.getElementById('renderer-status').textContent)};

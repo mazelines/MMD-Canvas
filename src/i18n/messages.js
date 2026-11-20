@@ -1,5 +1,8 @@
 // Source Korean text -> English, Simplified Chinese, Japanese.
 export const messages = {
+  'MMD Canvas {0} 버전을 사용할 수 있습니다.': ['MMD Canvas {0} is available.', 'MMD Canvas {0} 已可下载。', 'MMD Canvas {0} が利用できます。'],
+  '다운로드': ['Download', '下载', 'ダウンロード'],
+  '이 버전 알림 닫기': ['Dismiss this version', '不再提示此版本', 'このバージョンの通知を閉じる'],
   '그림자 바닥': ['Shadow floor', '阴影下限', '影の下限'],
   '하늘 방향성': ['Sky directionality', '天空方向性', '空の指向性'],
   '태양 방향으로 하늘빛이 치우치는 정도입니다. 0은 균일, 1은 최대이며 주변광이 있을 때 보입니다.': ['Biases sky lighting toward the sun. 0 is uniform, 1 is strongest; requires ambient light.', '控制天空光向太阳方向的偏向。0 为均匀，1 为最强；需要环境光。', '空の光を太陽方向に偏らせます。0 は均一、1 は最大。環境光が必要です。'],
@@ -342,6 +345,10 @@ export const messages = {
   "빌트인 셰이더는 삭제할 수 없습니다.": ["Built-in shaders cannot be deleted.", "内置着色器无法删除。", "ビルトインシェーダーは削除できません。"],
   "수정된 셰이더가 있습니다. .shader 파일로 저장하시겠습니까?": ["Some shaders were modified. Save them as .shader files?", "有着色器被修改。是否保存为 .shader 文件？", "変更されたシェーダーがあります。.shader ファイルとして保存しますか？"],
   "셰이더는 .shader 파일로 저장됩니다. 빌트인 수정본은 지정한 경로에 새 .shader로 내보내집니다.": ["Shaders are saved as .shader files. A modified built-in is exported as a new .shader at the path you choose.", "着色器保存为 .shader 文件。修改后的内置着色器会导出到您指定路径的新 .shader 文件。", "シェーダーは .shader ファイルとして保存されます。ビルトインの修正版は指定したパスに新しい .shader として書き出されます。"],
+  "MMD Canvas가 마음에 드셨나요? GitHub에서 별을 눌러 주세요!": ["Enjoying MMD Canvas? Give it a star on GitHub!", "喜欢 MMD Canvas 吗？请在 GitHub 上加星！", "MMD Canvas を気に入っていただけましたか？GitHub でスターをお願いします！"],
+  "★ 별 주기": ["★ Star", "★ 加星", "★ スター"],
+  "★ GitHub에서 별 주기": ["★ Star on GitHub", "★ 在 GitHub 上加星", "★ GitHub でスター"],
+  "닫기": ["Close", "关闭", "閉じる"],
   "스택 라이브러리": ["Stack Library", "堆栈库", "スタックライブラリ"],
   "스택 추가": ["Add Stack", "添加堆栈", "スタックを追加"],
   "스택": ["Stack", "堆栈", "スタック"],

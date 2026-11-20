@@ -43,11 +43,15 @@ void ToonRamp(inout ShadingContext ctx) {
 //@property float intensity = 1.0 [0,2] "강도"
 //@property float3 rimColor = (1,1,1) "림 색상"
 void DepthRimLight(inout ShadingContext ctx) {
-    float2 offsetBase = ctx.lightDirScreen / max(ctx.depth, 0.001);
-    float2 offsetUV = offsetBase * (3.0 * width) * (width * width);
-    float neighborDepth = sampleSceneDepth(ctx.pixel + offsetUV * ctx.viewportSize);
-    float rel = abs(neighborDepth - ctx.depth) / max(ctx.depth, 0.001);
-    float mask = saturate((rel - bias) / max(fade, 1e-5));
+    // Light-facing variant: width is linear, in 3-pixel units at 1080p.
+    float2 direction = ctx.lightDirScreen / max(length(ctx.lightDirScreen), 1e-5);
+    float2 samplePixel = ctx.pixel + direction * (3.0 * width) * (ctx.viewportSize.y / 1080.0);
+    // Off-screen depth is unknown; do not turn the viewport border into a rim.
+    if (any(samplePixel < 0) || any(samplePixel >= ctx.viewportSize)) return;
+    float neighborDepth = sampleSceneDepth(samplePixel);
+    float rel = (neighborDepth - ctx.depth) / max(ctx.depth, 0.001);
+    // Background is 0 in this renderer, and represents open space beyond the silhouette.
+    float mask = neighborDepth <= 0 ? 1.0 : smoothstep(bias, bias + max(fade, 1e-5), rel);
     ctx.color += rimColor * mask * intensity;
 }` },
 ];

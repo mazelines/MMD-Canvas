@@ -335,6 +335,17 @@
         "params": {
           "toon-band": {
             "shadowFloor": 0.15
+          },
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
           }
         }
       },
@@ -345,16 +356,33 @@
             "shadowFloor": 0.06
           },
           "layer-2": {
-            "width": 0.54,
-            "bias": 0.07,
-            "fade": 0.14,
-            "intensity": 0.66
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
           }
         }
       },
       {
         "ref": "shaders/Default_Toon.shader",
-        "params": {}
+        "params": {
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
       },
       {
         "ref": "shaders/Default_Toon.shader",
@@ -363,59 +391,15 @@
             "shadowFloor": 0.05
           },
           "layer-2": {
-            "width": 0.56
-          }
-        }
-      },
-      {
-        "ref": "shaders/Default_Toon.shader",
-        "params": {}
-      },
-      {
-        "ref": "shaders/Default_Toon.shader",
-        "params": {
-          "layer-2": {
-            "width": 0
-          }
-        }
-      },
-      {
-        "ref": "shaders/Default_Toon.shader",
-        "params": {
-          "layer-2": {
-            "width": 0.05,
-            "intensity": 0.11
-          }
-        }
-      },
-      {
-        "ref": "shaders/Default_Toon.shader",
-        "params": {}
-      },
-      {
-        "ref": "shaders/Default_Toon.shader",
-        "params": {}
-      },
-      {
-        "ref": "shaders/Default_Toon.shader",
-        "params": {}
-      },
-      {
-        "ref": "shaders/Default_Toon.shader",
-        "params": {}
-      },
-      {
-        "ref": "shaders/Default_Toon.shader",
-        "params": {}
-      },
-      {
-        "ref": "shaders/Default_Toon.shader",
-        "params": {
-          "layer-2": {
-            "width": 0.27,
-            "intensity": 0.2,
-            "bias": 0.05,
-            "fade": 0.09
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
           }
         }
       },
@@ -423,8 +407,15 @@
         "ref": "shaders/Default_Toon.shader",
         "params": {
           "layer-2": {
-            "width": 0.43,
-            "intensity": 0.52
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
           }
         }
       },
@@ -432,42 +423,289 @@
         "ref": "shaders/Default_Toon.shader",
         "params": {
           "layer-2": {
-            "width": 0.17,
-            "bias": 0.04
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
           }
         }
       },
       {
         "ref": "shaders/Default_Toon.shader",
-        "params": {}
+        "params": {
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
       },
       {
         "ref": "shaders/Default_Toon.shader",
-        "params": {}
+        "params": {
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
       },
       {
         "ref": "shaders/Default_Toon.shader",
-        "params": {}
+        "params": {
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
       },
       {
         "ref": "shaders/Default_Toon.shader",
-        "params": {}
+        "params": {
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
       },
       {
         "ref": "shaders/Default_Toon.shader",
-        "params": {}
+        "params": {
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
       },
       {
         "ref": "shaders/Default_Toon.shader",
-        "params": {}
+        "params": {
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
       },
       {
         "ref": "shaders/Default_Toon.shader",
-        "params": {}
+        "params": {
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
       },
       {
         "ref": "shaders/Default_Toon.shader",
-        "params": {}
+        "params": {
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      },
+      {
+        "ref": "shaders/Default_Toon.shader",
+        "params": {
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      },
+      {
+        "ref": "shaders/Default_Toon.shader",
+        "params": {
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      },
+      {
+        "ref": "shaders/Default_Toon.shader",
+        "params": {
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      },
+      {
+        "ref": "shaders/Default_Toon.shader",
+        "params": {
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      },
+      {
+        "ref": "shaders/Default_Toon.shader",
+        "params": {
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      },
+      {
+        "ref": "shaders/Default_Toon.shader",
+        "params": {
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      },
+      {
+        "ref": "shaders/Default_Toon.shader",
+        "params": {
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      },
+      {
+        "ref": "shaders/Default_Toon.shader",
+        "params": {
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      },
+      {
+        "ref": "shaders/Default_Toon.shader",
+        "params": {
+          "layer-2": {
+            "width": 3,
+            "bias": 0,
+            "fade": 0.26,
+            "intensity": 0.39,
+            "rimColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
       }
     ],
     "shaderFiles": [

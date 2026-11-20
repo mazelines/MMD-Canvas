@@ -6,7 +6,7 @@ const asar = require('@electron/asar');
 
 function verifyPackage(archive, projectDir = path.resolve(__dirname, '..')) {
   const required = ['package.json', 'electron/main.js', 'electron/preload.cjs', 'electron/gpu-presenter.cjs',
-    'renderer/index.html', 'renderer/app.js', 'renderer/viewer.js',
+    'renderer/index.html', 'renderer/app.js', 'renderer/viewer.js', 'electron/update-checker.js',
     'renderer/shader-stack.html', 'renderer/shader-stack-window.js', 'renderer/shader-stack-panel.js',
     'renderer/cortao.js', 'electron/dx12.js', 'renderer/dx12.js', 'renderer/native-textures.js',
     'node_modules/three/build/three.core.js', 'src/core/ambient-occlusion.js', 'licenses/CORTAO-MIT.txt', 'licenses/NVIDIA-DLSS.txt', 'licenses/NVIDIA-NIS.txt', 'licenses/DXC-SDK.txt',
