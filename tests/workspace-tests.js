@@ -13,15 +13,26 @@ export function sampleWorkspace() {
     model: { path: 'C:\\project\\models\\캐릭터.pmx', materials: [{ name: '体', visible: false, emissiveNits: 250 }], morphs: [{ name: 'あ', weight: 0.5 }] },
     viewport: { exposure: { ev100: 2.5, compensation: 1 }, mode: 'toon', outline: { width: 2.7, color: '#ab3344' }, flags: { grid: false, skeleton: true, wireframe: false },
       cortao: { enabled: true, intensity: 1, radius: 2 },
-      lightIntensity: 12500.5, lightUnit: 'lux', ambientIntensity: 3.5, lightDirection: [1, 2, 3], shadowEnabled: true, shadowSoftness: 0.04, gizmo: true,
+      lightIntensity: 12500.5, lightUnit: 'lux', ambientIntensity: 3.5, skyDirectionality: 0.5, lightDirection: [1, 2, 3], shadowEnabled: true, shadowSoftness: 0.04, gizmo: true,
       gizmoSpace: 'world', gizmoMode: 'rotate', gizmoPosition: [1, 4, 5],
-      camera: { position: [2, 4, 7], target: [0, 1, 0], up: [0, 1, 0], fov: 35, zoom: 1, near: 0.1, far: 100, maxDistance: 50 }, shaderStack: [], shaderLibrary: [], materialAssign: [], materialInstances: [] },
+      camera: { position: [2, 4, 7], target: [0, 1, 0], up: [0, 1, 0], fov: 35, zoom: 1, near: 0.1, far: 100, maxDistance: 50 }, materialInstances: [], shaderFiles: [] },
     conversion: { mode: 'single', format: 'usdz', output: 'C:\\project\\export\\キャラクター.usdz', source: 'C:\\project\\models\\캐릭터.pmx', scale: 8, nameMode: 'english', morphs: true, copyTextures: true, asciiNames: true, recursive: false },
     inspector: { tab: 'materials', selectedMaterial: 0, filter: '体', soloVisibility: [true] },
   };
 }
 
 export function registerWorkspaceTests(test) {
+  test('workspace: directional sky persists, migrates and rejects invalid settings', () => {
+    const workspace = sampleWorkspace();
+    workspace.viewport.skyDirectionality = 0.8;
+    assert.equal(validateWorkspace(workspace).viewport.skyDirectionality, 0.8);
+    delete workspace.viewport.skyDirectionality;
+    assert.equal(validateWorkspace(workspace).viewport.skyDirectionality, 0.5);
+    for (const bad of [-0.1, 1.1, NaN, null, '0.5']) {
+      workspace.viewport.skyDirectionality = bad;
+      assert.throws(() => validateWorkspace(workspace));
+    }
+  });
   test('workspace: CORTAO round-trips, old files remain disabled, invalid settings fail', () => {
     const workspace = sampleWorkspace();
     workspace.viewport.cortao = { enabled: true, intensity: 1.7, radius: 4.3 };

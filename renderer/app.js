@@ -2,7 +2,7 @@ import { t, setLanguage, getLanguage, formatNumber, translateStatic } from '../s
 import { Viewer, VIEWABLE } from './viewer.js';
 import { MaterialPanel } from './material-panel.js';
 import { captureWorkspace, restoreWorkspaceState } from './workspace-state.js';
-import { DEFAULT_LIGHT_LUX, DEFAULT_AMBIENT_LUX, DEFAULT_EV100, clampLightLux, legacyLightToLux } from '../src/core/lighting.js';
+import { DEFAULT_LIGHT_LUX, DEFAULT_AMBIENT_LUX, DEFAULT_SKY_DIRECTIONALITY, DEFAULT_EV100, clampLightLux, legacyLightToLux } from '../src/core/lighting.js';
 import { DEFAULT_CORTAO } from '../src/core/ambient-occlusion.js';
 import { Dx12Viewport } from './dx12.js';
 
@@ -47,18 +47,26 @@ const materialPanel = new MaterialPanel(viewer);
 // hook (invoked via executeJavaScript) plus the IPC listener as a fallback.
 window.__shaderStackRender = () => viewer.requestRender();
 api.onShaderStackApplied(() => viewer.requestRender());
-// Per-material shader assignment: sync the assignment into the viewport (sceneKey
-// includes it, so a change re-exports the model with new native stackIds) and push
-// the material name list to main for the editor's material selector.
+// Per-material shader assignment lives in the material inspector. Sync the shader
+// state into the viewport (sceneKey includes materialAssign, so a change re-exports
+// the model with new native stackIds) and into the inspector (assignment dropdown +
+// per-material property values). Push material names to main so it can pad instances.
 const pushMaterialNames = () => api.shaderStackMaterials((viewer.current?.materials || []).map(m => m.name)).catch(() => {});
-api.onShaderStackUpdated((state) => {
+const syncShaderState = (state) => {
   if (!state) return;
   viewer.dx12.library = state.library || [];
   viewer.dx12.instances = state.instances || [];
   viewer.dx12.stride = state.stride || 1;
   viewer.dx12.materialAssign = (state.instances || []).map(i => i?.stackId || 0);
+  materialPanel.setShaderState(state);
   viewer.requestRender();
-});
+};
+api.onShaderStackUpdated(syncShaderState);
+// Broadcasts can be missed while this window is backgrounded (the shader editor
+// window has focus). Re-pull shader state when the window regains focus so the
+// viewport mirror and the material inspector stay current.
+window.__refreshShaderState = () => api.shaderStackLibraryGet().then(syncShaderState).catch(() => {});
+window.addEventListener('focus', () => { window.__refreshShaderState(); });
 {
   const prev = viewer.onMaterialsChanged;
   viewer.onMaterialsChanged = () => { prev?.(); pushMaterialNames(); };
@@ -136,7 +144,8 @@ const state = {
     }
     debug.value = viewer.cortao.debugView;
     hint.hidden = debug.value === 'off';
-    hint.textContent = !settings.enabled ? t('CORTAO가 꺼져 있습니다. 켜면 차폐량을 확인할 수 있습니다.')
+    hint.textContent = debug.value === 'bent' ? t('RGB: 월드 X·Y·Z 방향. AO가 꺼져 있으면 기하 법선을 표시합니다.')
+      : !settings.enabled ? t('CORTAO가 꺼져 있습니다. 켜면 차폐량을 확인할 수 있습니다.')
       : debug.value === 'raw' ? t('검정: 차폐 · 흰색: 개방. 필터·강도 적용 전 값입니다.')
       : t('검정: 차폐 · 흰색: 개방. 필터·강도 적용 후 값입니다.');
   };
@@ -313,6 +322,8 @@ async function openModel(filePath, fromWorkspace = false) {
     state.loadedPath = filePath;
     state.loadedInfo = info;
     renderInfo(info, filePath);
+    // Discover user .shader files beside the model (workspace open sets its own dir).
+    if (!fromWorkspace) api.shaderStackSetDir(dirname(filePath)).catch(() => {});
     $('btn-convert').disabled = info.kind !== 'pmx';
     document.querySelectorAll('#file-list li.loaded').forEach((li) => li.classList.remove('loaded'));
     const idx = state.visible.findIndex((e) => e.path === filePath);
@@ -507,6 +518,20 @@ for (const flag of ['grid', 'skeleton', 'wireframe']) {
   input.addEventListener('dblclick', () => { input.blur(); apply(DEFAULT_AMBIENT_LUX, true); });
   const saved = localStorage.getItem('ambientIlluminanceLux');
   apply(saved !== null && Number.isFinite(Number(saved)) ? Number(saved) : DEFAULT_AMBIENT_LUX, false);
+}
+{
+  const input = $('sky-directionality');
+  const apply = (value, save) => {
+    if (!Number.isFinite(value)) return;
+    viewer.setSkyDirectionality(value);
+    if (document.activeElement !== input) input.value = String(viewer.skyDirectionality);
+    if (save && !state.restoring) localStorage.setItem('skyDirectionality', String(viewer.skyDirectionality));
+  };
+  input.addEventListener('input', () => apply(input.valueAsNumber, true));
+  input.addEventListener('blur', () => { input.value = String(viewer.skyDirectionality); });
+  input.addEventListener('dblclick', () => { input.blur(); apply(DEFAULT_SKY_DIRECTIONALITY, true); });
+  const saved = localStorage.getItem('skyDirectionality');
+  apply(saved !== null && Number.isFinite(Number(saved)) ? Number(saved) : DEFAULT_SKY_DIRECTIONALITY, false);
 }
 {
   // soft shadows: toggle + softness (0..100 -> tan of the light's angular radius)
@@ -730,9 +755,12 @@ async function saveWorkspace(saveAs = false) {
   state.workspaceBusy = true; updateWorkspaceBar();
   try {
     const data = captureWorkspace(viewer, state, materialPanel);
+    // Persist shader REFERENCES (absolute .shader paths / builtin keys), not code.
+    // encodeWorkspace relativizes them against the canvas directory.
     const lib = await api.shaderStackLibraryGet();
-    data.viewport.shaderLibrary = lib.library;
-    data.viewport.materialInstances = lib.instances;
+    const refOf = (stackId) => { const e = lib.library[stackId - 1]; return e ? (e.source === 'file' ? (e.path || e.ref) : e.ref) : 'builtin:Default Toon'; };
+    data.viewport.materialInstances = lib.instances.map(i => ({ ref: refOf(i.stackId), params: i.params || {} }));
+    data.viewport.shaderFiles = [...new Set(lib.library.filter(e => e.source === 'file' && e.path).map(e => e.path))];
     const result = await api.saveWorkspace(data, state.workspacePath, saveAs);
     if (!result) return;
     state.workspacePath = result.filePath;
@@ -769,15 +797,14 @@ async function openWorkspace(filePath = null, { remember = true } = {}) {
     state.restoring = true; // controls are driven through their own events; keep those out of the saved defaults
     try { changed = restoreWorkspaceState(data, viewer, state, materialPanel, applyRenderMode, applyOutline); }
     finally { state.restoring = false; reportMenuState(); }
-    // Restore the shader library + per-material instances best-effort. Migrate a
-    // legacy global stack into a library stack assigned to every material.
+    // Restore shader references: discover .shader files relative to the canvas and
+    // map each material's ref to a library shader. No legacy migration.
     try {
-      let library = data.viewport.shaderLibrary, instances = data.viewport.materialInstances;
-      if (!library && data.viewport.shaderStack?.length) {
-        library = [{ name: '기본', outline: data.viewport.mode === 'toon', layers: data.viewport.shaderStack }];
-        instances = (viewer.current?.materials || []).map(() => ({ stackId: 1, params: {} }));
-      }
-      await api.shaderStackRestore(library || [], instances || []);
+      await api.shaderStackRestore({
+        instances: data.viewport.materialInstances || [],
+        shaderFiles: data.viewport.shaderFiles || [],
+        baseDir: dirname(result.filePath),
+      });
     } catch { /* kept in main */ }
     $('convert-dialog').close(); $('convert-result').hidden = true; state.lastOutput = null;
     state.workspacePath = result.filePath;

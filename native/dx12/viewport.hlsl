@@ -7,10 +7,10 @@ cbuffer Frame : register(b0) {
     float4x4 projection;
     float4 sun;              // towards light, lux
     float4 sky;              // linear RGB, ambient lux
-    float4 ground;
+    float4 ground;           // linear RGB, sky directionality 0..1
     float4 viewport;         // width, height, tan(light angular radius), AO world radius
     float4 settings;         // EV exposure scale, toon, shadows, AO enabled
-    float4 ao;               // strength, debug: 0/color 1/filtered 2/raw, shadow samples, bias
+    float4 ao;               // strength, debug: 0/color 1/filtered 2/raw 3/bent, shadow samples, bias
     float4 background;       // display-linear background, grid enabled
     float4 misc;             // ground height, grid size, model diagonal, outline width
     float4 outlineColor;     // exposure-protected scene-linear outline RGB, requested AA mode
@@ -30,7 +30,7 @@ StructuredBuffer<Material> materials : register(t2);
 RaytracingAccelerationStructure scene : register(t3);
 Texture2D<float4> normalDepth : register(t4);
 StructuredBuffer<uint> packed : register(t5);
-Texture2D<float> rawAO : register(t6);
+Texture2D<float4> rawAO : register(t6); // visibility, view-space bent normal
 Texture3D<uint> occluderLut : register(t7);
 Texture2D<float4> images[128] : register(t8);
 Texture2D<float4> hdrColor : register(t136);
@@ -47,7 +47,7 @@ Texture2D<float4> shadowSpatialIntermediate : register(t146);
 Texture2D<float4> aaResult : register(t147);
 Texture2D<float4> composite : register(t148);
 RWStructuredBuffer<uint> packedOut : register(u0);
-RWTexture2D<float> aoOut : register(u1);
+RWTexture2D<float4> aoOut : register(u1);
 RWTexture2D<float4> output : register(u2);
 RWTexture2D<float4> surfaceOut : register(u3);
 RWTexture2D<float4> motionOut : register(u4);
@@ -112,7 +112,13 @@ PrepassOutput normalMain(Varying v, bool front : SV_IsFrontFace, uint primitive 
     Material m = materials[materialId]; cullSide(m, front); float a = surfaceAlpha(m, surfaceUv(m, v.uv));
     clip(a - max(m.options.x, m.options.y > 0 ? 0.5 : 0.001));
     PrepassOutput o;
-    o.normal = float4(mul((float3x3)view, surfaceNormal(v, front,m)), v.depth);
+    // Occluder disks must describe the actual rasterized surface. Interpolated
+    // or normal-mapped lighting normals can put the surface itself inside its
+    // sampling hemisphere, creating triangle-shaped self-occlusion.
+    float3 viewPosition = mul(view, float4(v.world, 1)).xyz;
+    float3 geometric = normalize(cross(normalize(ddx(viewPosition)), normalize(ddy(viewPosition))));
+    geometric *= dot(geometric, -viewPosition) >= 0 ? 1 : -1;
+    o.normal = float4(geometric, v.depth);
     o.surface = float4(v.world, (front ? 1.0 : -1.0) * (triangleOffset + primitive + 1));
     o.motion = float4(v.previousWorld, 1);
     return o;
@@ -195,26 +201,39 @@ float shadowVisibility(float3 origin, float3 geometricNormal, float2 pixel) {
     return visibility / samples;
 }
 #include "temporal-shadow.hlsl"
-float visibilityAt(int2 pixel) {
-    if (settings.w == 0 || ao.x == 0) return 1;
+float3 directionOr(float3 direction, float3 fallback) {
+    float length2 = dot(direction, direction);
+    return all(isfinite(direction)) && length2 > 1e-8 ? direction * rsqrt(length2) : fallback;
+}
+float4 occlusionAt(int2 pixel) {
     float4 center = normalDepth.Load(int3(pixel, 0));
-    if (center.w == 0) return 1;
+    if (settings.w == 0 || ao.x == 0 || center.w == 0) return float4(1, center.xyz);
     float weight = 0, total = 0;
+    float3 bentDelta = 0;
+    float bentWeight = 0;
     for (int y = -2; y <= 2; ++y) for (int x = -2; x <= 2; ++x) {
         int2 p = clamp(pixel + int2(x,y), int2(0,0), int2(viewport.xy)-1);
         float4 neighbor = normalDepth.Load(int3(p,0));
         float w = exp(-0.5 * (x*x+y*y)) * pow(saturate(dot(center.xyz, neighbor.xyz)), 8);
         w *= saturate(1 - abs(center.w - neighbor.w) / max(viewport.w * 0.1, center.w * 0.001));
         if (neighbor.w == 0) w = 0;
-        total += rawAO.Load(int3(p,0)) * w; weight += w;
+        float4 sampleAO = rawAO.Load(int3(p,0));
+        total += sampleAO.x * w; weight += w;
+        // A fully blocked sample has no preferred direction. Weight directions
+        // by visibility so its fallback normal cannot pull open neighbors.
+        bentDelta += (sampleAO.yzw - neighbor.xyz) * (sampleAO.x * w);
+        bentWeight += sampleAO.x * w;
     }
-    return saturate(1 - (1 - (weight > 0 ? total / weight : 1)) * ao.x);
+    float visibility = saturate(1 - (1 - (weight > 0 ? total / weight : 1)) * ao.x);
+    // Filter the bend, not the underlying surface normal: fully open curved
+    // surfaces and normal maps must not acquire a blur-induced lighting tilt.
+    float3 bent = directionOr(center.xyz + bentDelta / max(bentWeight, 1e-8), center.xyz);
+    bent = directionOr(lerp(center.xyz, bent, saturate(ao.x)), center.xyz);
+    return float4(visibility, bent);
 }
+float visibilityAt(int2 pixel) { return occlusionAt(pixel).x; }
 #include "shading-context.hlsl"
-// Fixed base shading: reproduces the original character lighting exactly and
-// populates the ShadingContext for user stack layers. The base result is
-// ctx.color; populating the other fields does not change it (unused fields are
-// optimized away when the user stack is empty).
+// Shared Lambert base and directional indirect lighting for all shader stacks.
 void baseShading(Varying v, bool front, uint primitive, inout ShadingContext ctx) {
     Material m = materials[materialId]; cullSide(m, front); float2 uv = surfaceUv(m, v.uv);
     float alpha = surfaceAlpha(m, uv); clip(alpha - max(m.options.x, 0.001));
@@ -234,14 +253,28 @@ void baseShading(Varying v, bool front, uint primitive, inout ShadingContext ctx
     }
     // Neutral Lambert base; toon/stylized looks are shader stacks (e.g. Default Toon).
     float direct = max(ndl, 0) * shade;
-    float3 fill = lerp(ground.rgb, sky.rgb, n.y * 0.5 + 0.5) * sky.w;
-    float screenAO = visibilityAt(int2(v.position.xy));
+    int2 pixel = int2(v.position.xy);
+    float4 occlusion = occlusionAt(pixel);
+    float3 bentNormal = n;
+    // Only the visible prepass surface owns this bent normal (MSAA edges and
+    // secondary transparent layers can belong to a different surface).
+    float surfaceKey = (front ? 1.0 : -1.0) * (triangleOffset + primitive + 1);
+    if (settings.w != 0 && ao.x > 0 && shadowSurface.Load(int3(pixel,0)).w == surfaceKey)
+    {
+        // Transfer only the occlusion-induced bend to the lighting normal.
+        // Smooth normals and normal maps still shape the light; the AO basis
+        // must not turn an open smooth mesh into a faceted lighting surface.
+        float3 bend = occlusion.yzw - normalDepth.Load(int3(pixel,0)).xyz;
+        bentNormal = directionOr(n + mul(transpose((float3x3)view), bend), n);
+    }
+    float3 fill = evaluateAmbient(bentNormal, bentNormal.y * 0.5 + 0.5);
+    float screenAO = occlusion.x;
     float materialAO = saturate(1 + (imageSample(m.maps.w, uv).r - 1) * m.options.w);
     float3 base=imageSurface(m.maps.x,uv).rgb,emissive=imageSurface(m.maps.z,uv).rgb;
     float3 albedo = m.color.rgb * (m.mapFlags.z>0?decodeSRGB(base):base);
     float3 emission = m.emission.rgb * (m.mapFlags.w>0?decodeSRGB(emissive):emissive);
     float3 lit = albedo * (direct * sun.w + fill * min(materialAO, screenAO)) / 3.141592653589793 + emission;
-    ctx.worldPos = v.world; ctx.normal = n; ctx.geoNormal = n; ctx.uv = uv;
+    ctx.worldPos = v.world; ctx.normal = n; ctx.geoNormal = n; ctx.bentNormal = bentNormal; ctx.uv = uv;
     ctx.viewDir = normalize(-mul(transpose((float3x3)view),float3(view[0][3],view[1][3],view[2][3])) - v.world);
     ctx.depth = v.depth; ctx.pixel = v.position.xy; ctx.front = front ? 1.0 : -1.0;
     ctx.albedo = albedo; ctx.emission = emission; ctx.alpha = alpha; ctx.materialColor = m.color.rgb;
@@ -277,7 +310,13 @@ uint cortao_samplePackedData(float2 uv, float level) {
     return packed[info.z + p.y * info.x + p.x];
 }
 uint cortao_sampleOccluderLookupTable(float3 uv) { return any(isnan(uv)) || any(isinf(uv)) ? 0 : occluderLut.Load(int4(clamp(int3(uv * float3(32,32,24)), int3(0,0,0), int3(31,31,23)), 0)); }
-void cortao_writeResult(int2 p, float visibility, float3 bentNormal, float3x3 basis, uint bits) { aoOut[p] = visibility; }
+void cortao_writeResult(int2 p, float visibility, float3 bentNormal, float3x3 basis, uint bits) {
+    float3 normal = normalDepth[p].xyz;
+    // The finite 32-ray set has a small directional bias even when fully open;
+    // use the exact surface normal there. Fully blocked rays can produce NaN.
+    float3 bent = bits == 0 || visibility <= 0 ? normal : directionOr(bentNormal, normal);
+    aoOut[p] = float4(visibility, bent);
+}
 [numthreads(8,8,1)] void packMain(uint3 tid : SV_DispatchThreadID) {
     if (any(tid.xy >= uint2(viewport.xy))) return;
     float4 n = normalDepth[tid.xy]; uint value = 0;
@@ -297,7 +336,7 @@ void cortao_writeResult(int2 p, float visibility, float3 bentNormal, float3x3 ba
 }
 [numthreads(8,8,1)] void cortaoMain(uint3 tid : SV_DispatchThreadID) {
     if (any(tid.xy >= uint2(viewport.xy))) return;
-    aoOut[tid.xy] = 1;
+    aoOut[tid.xy] = float4(1, normalDepth[tid.xy].xyz);
     if (settings.w == 0 || normalDepth[tid.xy].w == 0) return;
     CORTAOMainPassParameters p = (CORTAOMainPassParameters)0;
     p.packedResolution = (uint(viewport.x) | (uint(viewport.y) << 16)); p.randomSeed = 0x7123ab49u;
@@ -313,7 +352,11 @@ void cortao_writeResult(int2 p, float visibility, float3 bentNormal, float3x3 ba
 [numthreads(8,8,1)] void outputMain(uint3 tid : SV_DispatchThreadID) {
     if (any(tid.xy >= uint2(aaInfo.xy))) return;
     if (ao.y > 0) {
-        float visible = ao.y > 1 ? rawAO[tid.xy] : visibilityAt(int2(tid.xy));
+        if (ao.y == 3) {
+            float3 bent = directionOr(mul(transpose((float3x3)view), occlusionAt(int2(tid.xy)).yzw), float3(0,1,0));
+            output[tid.xy] = float4(normalDepth[tid.xy].w > 0 ? bent * 0.5 + 0.5 : float3(0.14,0.14,0.14), 1); return;
+        }
+        float visible = ao.y == 2 ? rawAO[tid.xy].x : visibilityAt(int2(tid.xy));
         output[tid.xy] = float4((normalDepth[tid.xy].w > 0 ? visible : 0.14).xxx, 1); return;
     }
     float4 hdr = aaInfo.z>0?aaResult[tid.xy]:hdrColor[tid.xy];

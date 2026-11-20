@@ -4,8 +4,9 @@ import { Viewer } from './viewer.js';
 import { Dx12Viewport } from './dx12.js';
 import { ShaderStackPanel } from './shader-stack-panel.js';
 
-// Unreal-material-editor style: a material preview sphere in the center canvas
-// (its own DX12 host, routed by sender in main), stack/code/properties on the right.
+// Unreal-material-editor style: a shader preview sphere in the center canvas
+// (its own DX12 host, routed by sender in main), library/stack/code/properties on
+// the right. Previews the selected library shader, not a model material.
 const api = window.api;
 const startup = await api.startup();
 setLanguage(startup.locale);
@@ -38,15 +39,18 @@ void viewer.dx12.start();
 
 const panel = new ShaderStackPanel();
 window.__shaderPanel = panel;
-await panel.load();
-function syncPreview(state) {
-  // The sphere previews the selected material's stack with that material's values.
-  const inst = (state.instances || [])[state.previewMaterial || 0] || { stackId: 0, params: {} };
-  viewer.dx12.library = state.library || [];
-  viewer.dx12.stride = state.stride || 1;
-  viewer.dx12.instances = [inst];
-  viewer.dx12.materialAssign = [inst.stackId || 0];
+let currentState = await api.shaderStackLibraryGet();
+panel.setState(currentState);
+function syncPreview() {
+  // The sphere previews the SELECTED library shader with preview-only values
+  // (code defaults unless tweaked). No model material is involved.
+  const stackId = panel.selectedStack || 0;
+  viewer.dx12.library = currentState.library || [];
+  viewer.dx12.stride = currentState.stride || 1;
+  viewer.dx12.instances = [{ stackId, params: panel.previewValues || {} }];
+  viewer.dx12.materialAssign = [stackId];
   viewer.requestRender();
 }
-api.onShaderStackUpdated(state => { panel.setState(state); syncPreview(state); });
-syncPreview(await api.shaderStackLibraryGet());
+panel.onPreviewChange = () => syncPreview();
+api.onShaderStackUpdated(state => { currentState = state; panel.setState(state); syncPreview(); });
+syncPreview();

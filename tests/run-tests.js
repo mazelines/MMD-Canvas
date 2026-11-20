@@ -21,6 +21,7 @@ import { registerWorkspaceTests } from './workspace-tests.js';
 import { registerAnimationTests } from './animation-tests.js';
 import { registerNativeRendererTests } from './native-renderer-tests.js';
 import { registerShaderStackTests } from './shader-stack-tests.js';
+import { registerShaderFileTests } from './shader-file-tests.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 setLanguage('ko'); // Core diagnostics are asserted independently of the host locale.
@@ -273,6 +274,7 @@ registerShadingTests(test);
 registerWorkspaceTests(test);
 registerAnimationTests(test, path.join(sampleDir, 'animated.gltf'));
 registerShaderStackTests(test);
+registerShaderFileTests(test, outDir);
 for (const run of pending) await run();
 
 if (process.argv.includes('--blender')) {

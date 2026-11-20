@@ -186,7 +186,7 @@ struct NativeRenderer {
         p.DepthStencilState.DepthEnable=TRUE; p.DepthStencilState.DepthWriteMask=depthWrite?D3D12_DEPTH_WRITE_MASK_ALL:D3D12_DEPTH_WRITE_MASK_ZERO; p.DepthStencilState.DepthFunc=D3D12_COMPARISON_FUNC_LESS_EQUAL;
         p.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE; p.NumRenderTargets=1; p.RTVFormats[0]=DXGI_FORMAT_R16G16B16A16_FLOAT; p.DSVFormat=DXGI_FORMAT_D32_FLOAT; p.SampleDesc.Count=blend?4:1; p.SampleMask=UINT_MAX;
         if(std::strcmp(pixel,"normalMain")==0) {
-            p.NumRenderTargets=3;p.RTVFormats[1]=p.RTVFormats[2]=DXGI_FORMAT_R32G32B32A32_FLOAT;
+            p.NumRenderTargets=3;p.RTVFormats[0]=p.RTVFormats[1]=p.RTVFormats[2]=DXGI_FORMAT_R32G32B32A32_FLOAT;
         }
         if(std::strcmp(pixel,"aaColorMain")==0||std::strcmp(pixel,"aaOutlineMain")==0) {
             p.SampleDesc.Count=1;p.NumRenderTargets=3;p.RTVFormats[1]=DXGI_FORMAT_R16G16_FLOAT;p.RTVFormats[2]=DXGI_FORMAT_R32_FLOAT;
@@ -321,12 +321,14 @@ struct NativeRenderer {
     void resize(uint32_t w,uint32_t h,uint32_t ow,uint32_t oh,uint32_t samples) {
         if(w==width&&h==height&&ow==outputWidth&&oh==outputHeight&&samples==colorSamples)return;
         if(!w||!h||w>4096||h>4096)throw std::runtime_error("Unsupported viewport size");width=w;height=h;outputWidth=ow;outputHeight=oh;colorSamples=samples;
-        normal=texture(w,h,DXGI_FORMAT_R16G16B16A16_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_GENERIC_READ);
+        // Linear view depth must retain fp32 precision before CORTAO packs it.
+        // Half depth turns sloped surfaces into steps at close/high-res views.
+        normal=texture(w,h,DXGI_FORMAT_R32G32B32A32_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_GENERIC_READ);
         hdr=texture(w,h,DXGI_FORMAT_R16G16B16A16_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_GENERIC_READ);
         hdrMs.Reset();if(samples==4)hdrMs=texture(w,h,DXGI_FORMAT_R16G16B16A16_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_RESOLVE_SOURCE,1,false,1,4);
         depthMs=texture(w,h,DXGI_FORMAT_D32_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,D3D12_RESOURCE_STATE_DEPTH_WRITE,1,false,1,samples);
         depth=texture(w,h,DXGI_FORMAT_D32_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,D3D12_RESOURCE_STATE_DEPTH_WRITE);
-        aoTexture=texture(w,h,DXGI_FORMAT_R32_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_GENERIC_READ);
+        aoTexture=texture(w,h,DXGI_FORMAT_R16G16B16A16_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_GENERIC_READ);
         const auto rw=D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
         for(uint32_t i=0;i<2;i++) {
             surfaces[i]=texture(w,h,DXGI_FORMAT_R32G32B32A32_FLOAT,rw|D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_GENERIC_READ);

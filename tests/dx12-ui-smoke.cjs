@@ -50,10 +50,10 @@ app.on('browser-window-created',(_event,win)=>{
         await api.dx12Model(nativeModel(model));
         const render=async(options={})=>{
           const data=v.dx12.frame(),f=new Float32Array(data,4);
-          f.set([...(options.direction??[0.3481553,0.6963106,0.6270597]),options.sun??10],32);f.set([1,1,1,options.ambient??4],36);f.set([1,1,1,0],40);
-          f.set([options.width??160,options.height??160,options.softness??0.06,1],44);
+          f.set([...(options.direction??[0.3481553,0.6963106,0.6270597]),options.sun??10],32);f.set([...(options.sky??[1,1,1]),options.ambient??4],36);f.set([...(options.groundColor??[1,1,1]),options.skyDirectionality??0],40);
+          f.set([options.width??160,options.height??160,options.softness??0.06,options.radius??1],44);
           f.set([options.exposure??100,options.toon??0,options.shadow??0,options.ao??0],48);
-          f.set([1,options.debug??0,options.rays??32,0],52);f.set([...(options.background??[0.03,0.03,0.03]),0],56);f.set([options.ground??-1,10,options.diagonal??7,options.outline??0],60);
+          f.set([options.intensity??1,options.debug??0,options.rays??32,0],52);f.set([...(options.background??[0.03,0.03,0.03]),0],56);f.set([options.ground??-1,10,options.diagonal??7,options.outline??0],60);
           f[67]=options.aa??0;
           // Decode/presentation equality checks must not include post-processing:
           // sharpening amplifies sub-level decode differences at edges.
@@ -100,6 +100,8 @@ app.on('browser-window-created',(_event,win)=>{
         const rgba=new Uint8Array(4*4*4);for(let i=0;i<rgba.length;i+=4){rgba[i]=255;rgba[i+3]=255;}
         textured.material.map=new THREE.DataTexture(rgba,4,4);textured.material.map.needsUpdate=true;
         await api.dx12Model(nativeModel(textured));check(difference(compressed,await render()).max<=1,'Native BC1 decoding must match RGBA pixels');
+        const {runDirectionalAmbientCases}=await import('../tests/dx12-directional-ambient-cases.js');
+        const directionalAmbient=await runDirectionalAmbientCases({viewer:v,THREE,nativeModel,render,difference,check});
         const {runShadowCases}=await import('../tests/dx12-shadow-cases.js');
         const selfIntersection=await runShadowCases({viewer:v,THREE,nativeModel,render,difference,check});
         const temporalSelfIntersection=await runShadowCases({viewer:v,THREE,nativeModel,render:options=>render({...options,rays:4}),difference,check});
@@ -107,8 +109,11 @@ app.on('browser-window-created',(_event,win)=>{
         const temporal=await runTemporalShadowCases({viewer:v,THREE,nativeModel,render,check});
         await api.dx12Model(nativeModel(new THREE.Group()));const clear=await render({background:[0.2,0.4,0.8]});
         check([124,170,231,255].every((value,i)=>Math.abs(clear[i]-value)<=1),'GPU presentation copy must preserve the native sRGB output bytes: '+Array.from(clear.slice(0,4)));
-        await api.dx12Stop();return{shadow,penumbra:soft,ambient,selfIntersection,temporalSelfIntersection,temporal,exposureIndependent:true,emissionPreserved:true,poseUpdates:true,compressedDDS:true,emptyScene:true,resizes:12};
+        await api.dx12Stop();return{shadow,penumbra:soft,ambient,directionalAmbient,selfIntersection,temporalSelfIntersection,temporal,exposureIndependent:true,emissionPreserved:true,poseUpdates:true,compressedDDS:true,emptyScene:true,resizes:12};
       })()`);
+      fs.mkdirSync(path.resolve('tests/out/directional-ambient'),{recursive:true});
+      for(const [name,url] of Object.entries(result.directionalAmbient.images))fs.writeFileSync(path.resolve('tests/out/directional-ambient',name+'.png'),Buffer.from(url.split(',')[1],'base64'));
+      delete result.directionalAmbient.images;
       if(errors.length)throw new Error(errors.join('\n'));console.log('DX12 GPU smoke passed:',JSON.stringify(result));clearTimeout(timeout);app.exit(0);
     }catch(e){console.error(e,errors);clearTimeout(timeout);app.exit(1);}
   });

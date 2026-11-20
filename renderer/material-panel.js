@@ -1,6 +1,7 @@
 import { t, formatNumber } from '../src/i18n/index.js';
 import { TEXTURE_SLOTS, textureInfo } from './material-info.js';
 import { MAX_EMISSIVE_NITS } from '../src/core/lighting.js';
+import { renderShaderProperties } from './shader-properties.js';
 
 const node = (tag, props = {}, ...children) => {
   const element = Object.assign(document.createElement(tag), props);
@@ -16,6 +17,7 @@ export class MaterialPanel {
     this.selected = 0;
     this.entries = [];
     this.savedVisibility = null;
+    this.shaderLibrary = []; this.shaderInstances = []; this._shaderSig = '';
     this.$ = (id) => document.getElementById(id);
     this.$('material-search').addEventListener('input', () => this.renderList());
     this.$('material-solo').addEventListener('click', () => this.toggleSolo());
@@ -37,6 +39,27 @@ export class MaterialPanel {
     this.$('material-tab-count').textContent = this.entries.length;
     this.$('texture-dialog').close();
     this.renderList(); this.renderDetail();
+  }
+
+  // Shader state mirror from main (library + per-material instances). Sync the
+  // viewport mirror directly so assignment/property edits apply to rendering even
+  // if the main-window push broadcast is missed, then rebuild the detail controls.
+  setShaderState(state) {
+    this.shaderLibrary = state.library || [];
+    this.shaderInstances = state.instances || [];
+    const dx = this.viewer.dx12;
+    if (dx) {
+      dx.library = this.shaderLibrary;
+      dx.instances = this.shaderInstances;
+      dx.stride = state.stride || 1;
+      dx.materialAssign = this.shaderInstances.map(i => i?.stackId || 0);
+      this.viewer.requestRender();
+    }
+    // Skip rebuild while the user is actively editing a property control (the live
+    // control already reflects the value); avoids interrupting slider drags.
+    const active = document.activeElement;
+    if (active && active.closest && active.closest('.material-shader-properties')) return;
+    this.renderDetail();
   }
 
   toggleSolo() {
@@ -108,6 +131,26 @@ export class MaterialPanel {
       host.append(block);
       return block;
     };
+    // Per-material shader assignment + independent instance property values
+    // (Unity-style material inspector). Assignment/values live in main's
+    // materialInstances; edits flow through IPC and broadcast back.
+    const shaderSection = section(t('셰이더'));
+    const shaderIndex = this.selected;
+    const instance = this.shaderInstances[shaderIndex] || { stackId: 0, params: {} };
+    const shaderSelect = node('select', { id: 'material-shader', ariaLabel: t('셰이더 지정') });
+    shaderSelect.append(node('option', { value: 0, textContent: t('기본 셰이딩') }),
+      ...this.shaderLibrary.map((s, i) => node('option', { value: i + 1, textContent: s.name })));
+    shaderSelect.value = String(instance.stackId || 0);
+    shaderSelect.addEventListener('change', () => { window.api.shaderStackAssign(shaderIndex, Number(shaderSelect.value)).then(st => { if (st) this.setShaderState(st); }).catch(() => {}); });
+    shaderSection.append(node('label', { className: 'shader-select-row' }, node('span', { textContent: t('지정') }), shaderSelect));
+    const assigned = instance.stackId >= 1 ? this.shaderLibrary[instance.stackId - 1] : null;
+    if (assigned) {
+      const propsHost = node('div', { id: 'material-shader-properties', className: 'material-shader-properties' });
+      shaderSection.append(propsHost);
+      renderShaderProperties(propsHost, assigned.layers || [], instance.params || {}, (layerId, propName, value) => {
+        window.api.shaderStackInstanceParams(shaderIndex, { [layerId]: { [propName]: value } }).then(st => { if (st) this.setShaderState(st); }).catch(() => {});
+      });
+    }
     const properties = section(t('표면 속성'));
     const grid = node('dl', { className: 'info-grid material-properties' });
     properties.append(grid);

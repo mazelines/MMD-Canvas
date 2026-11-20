@@ -106,6 +106,13 @@ const os = require('node:os');
           check($('texture-dialog').open && $('texture-preview').querySelector('canvas'), 'texture enlargement');
           $('texture-close').click();
           check(!$('texture-dialog').open, 'texture dialog closes');
+          // Per-material shader assignment lives in the inspector (not the editor).
+          check($('material-shader'), 'inspector has a shader assignment dropdown');
+          check($('material-shader').options.length >= 3, 'shader dropdown lists base + built-in stacks');
+          await window.api.shaderStackAssign(0, 2); await window.__refreshShaderState();
+          check(__viewer.dx12.materialAssign[0] === 2, 'inspector assignment syncs to the viewport');
+          await window.api.shaderStackAssign(0, 1); await window.__refreshShaderState();
+          check(__viewer.dx12.materialAssign[0] === 1, 'assignment restores');
           return { materials: rows().length, textures: $('material-detail').querySelectorAll('.texture-card').length };
         })()`);
         await fs.writeFile(path.resolve('tests/out/material-panel-pmx.png'), (await capture()).toPNG());

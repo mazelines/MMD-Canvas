@@ -1,7 +1,31 @@
 import assert from 'node:assert/strict';
-import { parseLayer, parseStack, packParams, hlslDeclarations, injectDeclarations, parseDefault, libraryStride, packMaterialParams } from '../src/core/shader-stack.js';
+import { parseLayer, parseStack, packParams, hlslDeclarations, injectDeclarations, parseDefault, libraryStride, packMaterialParams, migrateBuiltinSky } from '../src/core/shader-stack.js';
 
 export function registerShaderStackTests(test) {
+  test('shader stack: saved built-in sky migrates without replacing authored code or IDs', () => {
+    const fill=`void ToonFill(inout ShadingContext ctx) {
+    float3 flatFill = lerp(ctx.groundColor, ctx.skyColor, 0.5) * ctx.ambientLux;
+    ctx.color += ctx.albedo * (flatFill - ctx.fill) * ctx.ao / 3.141592653589793;
+}`;
+    const old=`//@property float shadowFloor = 0.251 [0,1] "그림자 바닥"
+void DefaultToon(inout ShadingContext ctx) {
+    float band = ctx.ndl < 0 ? shadowFloor : 1.0;
+    float toonDirect = lerp(shadowFloor, band, ctx.shade);
+    ctx.color += ctx.albedo * (toonDirect - ctx.direct) * ctx.sunLux / 3.141592653589793;
+    float3 flatFill = lerp(ctx.groundColor, ctx.skyColor, 0.5) * ctx.ambientLux;
+    ctx.color += ctx.albedo * (flatFill - ctx.fill) * ctx.ao / 3.141592653589793;
+}`;
+    const library=[fill,old,fill+'\n// Custom',fill.replace('0.5','0.3')].map((code,i)=>({name:'Default Toon',outline:true,layers:[{id:'keep-'+i,code,enabled:false}]}));
+    library.push({...library[0],name:'Authored shader'});
+    const migrated=migrateBuiltinSky(library);
+    for(let i=0;i<2;i++){
+      assert.match(migrated[i].layers[0].code,/evaluateAmbient\(ctx.bentNormal, 0.5\)/);
+      assert.equal(migrated[i].layers[0].id,'keep-'+i);assert.equal(migrated[i].layers[0].enabled,false);
+      assert.match(library[i].layers[0].code,/lerp\(ctx.groundColor/);
+    }
+    for(let i=2;i<library.length;i++)assert.deepEqual(migrated[i],library[i]);
+    assert.deepEqual(migrateBuiltinSky(migrated),migrated);
+  });
   test('shader stack: property annotation parsing', () => {
     const code = `//@property float strength = 0.5 [0,1] "림 강도"
 //@property float3 tint = (1,0,0) "색상"

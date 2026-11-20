@@ -71,7 +71,27 @@ app.on('browser-window-created',(_event,win)=>win.webContents.once('did-finish-l
       catch(e){compileError=e.message;}
       const afterError=await draw();
       const stillWorks=diff(baseline,afterError);
-      return{load,reset,rimError,paramError,depthLoad,depthError,restoreError,compileError,stillWorks};
+      // Review the actual character with AO, direct DXR shadows and directional
+      // sky together, on both built-in material paths (DLAA after convergence).
+      const skyImages={},skyDifferences=[];
+      for(const stackId of [0,1]){
+        await api.dx12MaterialStacks(new Array(256).fill(stackId));
+        let previous=null;
+        for(const side of [-1,1]){
+          const dir=new THREE.Vector3(side*0.8,0.4,0.5).normalize();
+          for(let i=0;i<16;i++){
+            const data=v.dx12.frame(),f=new Float32Array(data,4);
+            f.set([...dir.toArray(),3],32);f[39]=3;f[43]=0.8;
+            f[44]=f[45]=640;f[48]=100;f[50]=f[51]=1;f[52]=1;f[53]=0;f[54]=4;f[67]=1;f[72]=0;
+            await api.dx12Render(data);
+          }
+          const c=document.getElementById('dx12-canvas');
+          const pixels=c.getContext('2d').getImageData(0,0,c.width,c.height).data;
+          if(previous)skyDifferences.push({stackId,...diff(previous,pixels)});previous=pixels;
+          skyImages['character-'+(stackId?'toon':'standard')+'-'+(side>0?'right':'left')]=c.toDataURL('image/png');
+        }
+      }
+      return{load,reset,rimError,paramError,depthLoad,depthError,restoreError,compileError,stillWorks,skyImages,skyDifferences};
     })()`);
     assert.ok(result.load.active===true,'Shader stack must become active');
     assert.ok(result.rimError.mean>0.2&&result.rimError.max>20,'User rim light must visibly change the character: '+JSON.stringify(result.rimError));
@@ -82,6 +102,9 @@ app.on('browser-window-created',(_event,win)=>win.webContents.once('did-finish-l
     assert.ok(result.restoreError.max<=1,'Restored default must match baseline: '+JSON.stringify(result.restoreError));
     assert.ok(result.compileError,'Invalid HLSL must surface a compiler error');
     assert.ok(result.stillWorks.max<=1,'Renderer must survive a compile error and keep the default: '+JSON.stringify(result.stillWorks));
+    for(const d of result.skyDifferences)assert.ok(d.mean>1,'Character lighting must follow sun direction: '+JSON.stringify(d));
+    fs.mkdirSync('tests/out/directional-ambient',{recursive:true});
+    for(const [name,url] of Object.entries(result.skyImages))fs.writeFileSync('tests/out/directional-ambient/'+name+'.png',Buffer.from(url.split(',')[1],'base64'));
     console.log('Shader stack end-to-end passed:',JSON.stringify({rimError:result.rimError,restoreError:result.restoreError,compileError:result.compileError.slice(0,120)}));
     clearTimeout(timeout);app.quit();
   }catch(error){console.error(error);clearTimeout(timeout);app.exit(1)}

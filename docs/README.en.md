@@ -10,6 +10,14 @@ A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
 
+## v0.8.0: .shader asset management and authoring/assignment separation
+
+Manage shaders as **`.shader` data container** files (metadata + Function Stack layers). `.canvas` does not embed shader code; it stores only **relative-path references recording which `.shader` each material uses**. Place `.shader` files in a `shaders/` folder under the model directory and they are managed and restored by relative path, just like models and textures.
+
+**Separation of concerns**: the shader stack editor is now a **pure shader authoring/management tool** (the material selection and assignment UI is removed). Edit, extend, and save built-in + user shaders as function stacks, and the center sphere previews the **selected shader**. Per-material shader **assignment** and **independent property values** are edited in the **material inspector** (Unity material inspector style).
+
+**Built-in assembly structure**: built-in shaders are themselves assemblies of separable function stacks, not monolithic code. Default Toon = **ToonBand** (2-band direct light) + **ToonFill** (flat ambient fill). Built-ins are in-memory base templates; editing one marks it dirty (●), and **saving exports it as a new `.shader` at a user-chosen path**. Closing the project with unsaved modifications shows a save prompt dialog. [Structure and syntax](shader-stack.md) · [0.8.0 release notes](release-notes/v0.8.0.md).
+
 ## v0.7.0: Unity-style per-material shader system
 
 Redesign the shader system Unity-style: **assign a different shader to each material**, and keep **property values independent per material** even when the same shader is shared. The global viewport Lambert/Toon shading modes are removed; shading is decided by per-material stack assignment. Two built-in stacks are provided: **Default Toon** (with outlines), reproducing the MMD standard toon look, and **Standard**, the neutral Lambert base. New materials default to Default Toon. In the shader stack editor, select a material to assign a stack and edit that material's own property values; the center sphere preview shows the selected material's shader. A shared per-stack DXIL separates material instances via `materialId*STRIDE` runtime indexing, and outlines toggle per material through each stack's flag. [Structure and syntax](shader-stack.md) · [0.7.0 release notes](release-notes/v0.7.0.md).
@@ -116,7 +124,7 @@ Run `npm run test:workspace` after `npm test` to verify saving/restoring and all
 - **Physical directional light:** illuminance in lux, default 10 lux; numeric range 0–200,000. Lambert uses reflectance × lux × cosine × shadow visibility / π. Double-click the slider to reset to 10 lux. No hidden fill light or mode-dependent intensity multiplier.
 - **File browser:** browse drives and folders, filter by filename or 3D format, navigate with the keyboard, and drag and drop files.
 - **3D viewer:** orbit, pan, zoom, frame the model, toggle grid/bones/wireframe, and control material visibility.
-- **Per-material shaders:** assign a shader (stack) to each material, Unity-style, with property values independent per material. Built-in Default Toon (two lighting tones and outlines) and Standard (neutral Lambert) are provided; add and assign user stacks in the shader stack editor.
+- **Per-material shaders:** assign a shader to each material, Unity-style, with property values independent per material. **Assignment and value editing are done in the material inspector**; **shader authoring and management are done in the shader stack editor**. Shaders are managed as `.shader` files; built-in Default Toon (ToonBand + ToonFill assembly, with outlines) and Standard (neutral Lambert) are provided.
 - **Outlines:** the DX12 hull pass draws outlines, toggled per material via each stack's flag (enabled for Default Toon). It honors the global width and color settings, follows skinning and morphs, and uses the original surface normals.
 - **Animation playback:** when a loaded model carries animation clips (FBX, glTF/GLB, DAE, USD), a transport bar appears at the bottom of the viewport and playback starts. It offers play/pause, back to start, clip selection, timeline scrubbing, speed (0.25–2×), and looping; shadows and toon outlines follow the motion. PMX files contain no animation, so the bar stays hidden for them, and loading VMD motions is not supported.
 - **PMX inspection:** vertex, triangle, material, bone, morph, and texture counts; model descriptions and conversion warnings; vertex morph sliders and reset.
@@ -135,12 +143,16 @@ Adjust **EV100 and exposure compensation** in the left viewport panel (defaults 
 
 v0.7.0 removes the global Lambert/Toon mode buttons and switches to **per-material shader assignment**. Each material uses one built-in or user stack, and materials sharing the same stack still keep independent property values.
 
+v0.8.0 separates **authoring from assignment**. The **shader stack editor** (Ctrl+Shift+K) is a pure tool for authoring and managing shaders themselves as function stacks (no material selection); in the "Shader" section of the **material inspector**, you assign a shader to each material and edit that material's own property values. Shaders are saved to disk as **`.shader` files** (metadata + layers), and `.canvas` keeps only relative-path references. Place them in a `shaders/` folder under the model and they are restored as-is by relative path.
+
 | Built-in stack | Appearance | Useful for |
 | --- | --- | --- |
-| **Default Toon** | Two lighting tones and silhouette outlines (the MMD standard toon look); the default assignment for new materials. | Previewing cel shading and character silhouettes |
+| **Default Toon** | Two lighting tones and silhouette outlines (the MMD standard toon look); assembled from the **ToonBand + ToonFill** function stacks; the default assignment for new materials. | Previewing cel shading and character silhouettes |
 | **Standard** | Smooth, neutral Lambert shading without outlines. | Inspecting shape, textures, and lighting |
 
 Default Toon cast shadows share the unlit face's dark tone instead of darkening it again. Hemisphere fill is controlled by the ambient lux setting. Soft DXR shadow edges interpolate between the two tones; source texture, emission, and AO variations remain visible.
+
+Built-ins are in-memory base templates. Editing a built-in in the editor marks it dirty (●), and **saving** exports a new `.shader` file at the path you specify (the built-in baseline is preserved). Closing the project with unsaved modifications shows a save prompt dialog.
 
 ![Toon rendering in MMD Canvas with lux lighting, EV100 exposure, outline settings, and the workspace view](images/mmd-canvas-toon-preview.png)
 
@@ -157,6 +169,8 @@ Shader assignments affect viewport previews only. They do not change original ma
 > The material inspector is available from `v0.2.0`, and the per-material shader system from `v0.7.0`.
 
 ## CORTAO contact shading
+
+**Sky directionality** (0–1, default 0.5) aligns a broad ambient-light lobe with the sun. CORTAO bent normals account for the direction light can enter creases; DXR still handles direct shadows. Use nonzero ambient lux and rotate the light gizmo to see it. The value persists in preferences and `.canvas`. **Debug View → Bent Normal** displays world directions as RGB, or surface normals when AO is off. This approximates environment lighting; it does not trace bounced-light GI.
 
 Under **CORTAO → Debug View**, `AO only` shows filtered, intensity-adjusted visibility; `Raw AO` shows the calculation before filtering and intensity. Black is occluded, white is open, and the background is gray. Lighting, textures, and exposure do not affect these views. Choose `Normal rendering` to return. Debug selection is not saved in workspaces. When CORTAO is off, the model appears white and a message explains why.
 

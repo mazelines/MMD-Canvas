@@ -16,6 +16,7 @@ export function captureWorkspace(viewer, state, panel) {
       cortao: { ...viewer.cortao.settings },
       mode: viewer.renderMode, outline: { ...viewer.outlineSettings }, flags: { ...viewer.flags },
       lightIntensity: viewer.lightLevel, lightUnit: 'lux', ambientIntensity: viewer.ambientLevel, lightDirection: viewer.sun.position.toArray(),
+      skyDirectionality: viewer.skyDirectionality,
       shadowEnabled: viewer.shadow.enabled, shadowSoftness: viewer.shadow.softness,
       gizmo: $('flag-light-gizmo').checked, gizmoSpace: viewer.lightControls.space,
       gizmoMode: viewer.lightControls.mode, gizmoPosition: viewer.lightRig.position.toArray(),
@@ -53,6 +54,7 @@ export function restoreWorkspaceState(data, viewer, state, panel, applyRenderMod
   for (const [flag, value] of Object.entries(v.flags)) change(`flag-${flag}`, value, true);
   change('light-intensity-number', v.lightIntensity, false, 'input');
   change('light-ambient-number', v.ambientIntensity, false, 'input');
+  change('sky-directionality', v.skyDirectionality, false, 'input');
   change('flag-shadow', v.shadowEnabled, true);
   change('shadow-softness', v.shadowSoftness / 0.12 * 100, false, 'input');
   viewer.setShadowSoftness(v.shadowSoftness); // the slider snaps to whole steps; keep the saved value exact
