@@ -2,7 +2,7 @@ import { t } from '../i18n/index.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { MAX_LIGHT_LUX, legacyLightToLux, LEGACY_EV100, MIN_EV100, MAX_EV100, MAX_EXPOSURE_COMPENSATION, MAX_EMISSIVE_NITS } from './lighting.js';
+import { MAX_LIGHT_LUX, DEFAULT_SKY_DIRECTIONALITY, legacyLightToLux, LEGACY_EV100, MIN_EV100, MAX_EV100, MAX_EXPOSURE_COMPENSATION, MAX_EMISSIVE_NITS } from './lighting.js';
 import { DEFAULT_CORTAO } from './ambient-occlusion.js';
 
 export const WORKSPACE_FORMAT = 'mmd-canvas-workspace';
@@ -61,6 +61,7 @@ export function validateWorkspace(value) {
         : number(v.lightIntensity, 'lightIntensity', 0, MAX_LIGHT_LUX),
       // 3. ambient fill; files written before it existed had none
       ambientIntensity: v.ambientIntensity === undefined ? 0 : number(v.ambientIntensity, 'ambientIntensity', 0, MAX_LIGHT_LUX),
+      skyDirectionality: v.skyDirectionality === undefined ? DEFAULT_SKY_DIRECTIONALITY : number(v.skyDirectionality, 'skyDirectionality', 0, 1),
       lightDirection: vector(v.lightDirection, 'lightDirection'),
       shadowEnabled: bool(v.shadowEnabled, 'shadowEnabled'), shadowSoftness: number(v.shadowSoftness, 'shadowSoftness', 0, 0.12),
       gizmo: bool(v.gizmo, 'gizmo'), gizmoSpace: choice(v.gizmoSpace, 'gizmoSpace', ['local', 'world']),
@@ -71,17 +72,9 @@ export function validateWorkspace(value) {
         near: number(camera.near, 'camera.near', 1e-12, 1e15), far: number(camera.far, 'camera.far', 1e-12, 1e15),
         maxDistance: number(camera.maxDistance, 'camera.maxDistance', 1e-12, 1e15),
       },
-      // Legacy global stack (migrated to a library on restore).
-      shaderStack: v.shaderStack === undefined ? [] : list(v.shaderStack, 'shaderStack', (item) => shaderLayer(item, 'shaderStack')),
-      // Per-material shader library: stacks of layers (with outline flag).
-      shaderLibrary: v.shaderLibrary === undefined ? [] : list(v.shaderLibrary, 'shaderLibrary', (item) => {
-        const s = object(item, 'shaderLibrary.stack');
-        return { name: string(s.name, 'shaderLibrary.name', 128), outline: s.outline === undefined ? false : bool(s.outline, 'shaderLibrary.outline'),
-          layers: s.layers === undefined ? [] : list(s.layers, 'shaderLibrary.layers', (l) => shaderLayer(l, 'shaderLibrary.layers')) };
-      }).slice(0, 64),
-      // Legacy material->stackId map (migrated to instances on restore).
-      materialAssign: v.materialAssign === undefined ? [] : list(v.materialAssign, 'materialAssign', (id) => number(id, 'materialAssign', 0, 64)).slice(0, 100000),
-      // Unity-style material instances: per-material stackId + independent params.
+      // Per-material shader instances: a stable .shader reference ('builtin:<name>'
+      // or a relative .shader path) + independent property values. Shader code lives
+      // in external .shader files, not embedded in the workspace.
       materialInstances: v.materialInstances === undefined ? [] : list(v.materialInstances, 'materialInstances', (item) => {
         const inst = object(item, 'materialInstances.item');
         const rawParams = inst.params === undefined ? {} : object(inst.params, 'materialInstances.params');
@@ -95,8 +88,10 @@ export function validateWorkspace(value) {
           }
           params[layerId] = clean;
         }
-        return { stackId: number(inst.stackId, 'materialInstances.stackId', 0, 64), params };
+        return { ref: string(inst.ref, 'materialInstances.ref', 32768), params };
       }).slice(0, 100000),
+      // Registry of referenced user .shader files (relative paths) for path mapping.
+      shaderFiles: v.shaderFiles === undefined ? [] : list(v.shaderFiles, 'shaderFiles', (p) => string(p, 'shaderFiles', 32768)).slice(0, 100000),
     },
     conversion: {
       mode: choice(c.mode, 'conversion.mode', ['single', 'batch']), format: choice(c.format, 'conversion.format', ['fbx', 'usda', 'usdz']),
@@ -131,6 +126,10 @@ function mapPaths(data, fn) {
   if (data.model) data.model.path = fn(data.model.path);
   if (data.conversion.output) data.conversion.output = fn(data.conversion.output);
   if (data.conversion.source) data.conversion.source = fn(data.conversion.source);
+  // .shader references are relative paths too (builtin:<name> refs are not paths).
+  const mapRef = (ref) => (typeof ref === 'string' && !ref.startsWith('builtin:')) ? fn(ref) : ref;
+  if (Array.isArray(data.viewport?.materialInstances)) for (const inst of data.viewport.materialInstances) inst.ref = mapRef(inst.ref);
+  if (Array.isArray(data.viewport?.shaderFiles)) data.viewport.shaderFiles = data.viewport.shaderFiles.map(mapRef);
   return data;
 }
 
@@ -155,6 +154,8 @@ export function networkPaths(data, filePath = '') {
   const host = (p) => /^[\\/]{2}([^\\/]+)/.exec(p)?.[1].toLowerCase() || null;
   const own = host(filePath);
   const paths = [data.browser.directory, data.model?.path, data.conversion.output, data.conversion.source];
+  for (const inst of data.viewport?.materialInstances || []) if (typeof inst.ref === 'string' && !inst.ref.startsWith('builtin:')) paths.push(inst.ref);
+  for (const p of data.viewport?.shaderFiles || []) paths.push(p);
   return [...new Set(paths.filter((p) => typeof p === 'string' && host(p) && host(p) !== own))];
 }
 

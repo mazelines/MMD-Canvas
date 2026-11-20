@@ -37,6 +37,7 @@ app.on('browser-window-created',(_event,win)=>win.webContents.once('did-finish-l
     assert.equal(startup.frame.antialiasing,'DLAA');assert.equal(startup.frame.aaAccumulating,false);
     await win.webContents.executeJavaScript(`(async()=>{
       const v=__viewer;v.dx12.enabled=false;v.controls.update=()=>false;
+      v.setCortao({enabled:true,intensity:1,radius:2});v.setAmbientIntensity(3);v.setSkyDirectionality(0.8);
       const THREE=await import('three'),b=new THREE.Box3().setFromObject(v.current.object);
       const head=b.getCenter(new THREE.Vector3()).setY(b.max.y-b.getSize(new THREE.Vector3()).y*0.18),offset=v.camera.position.clone().sub(v.controls.target);
       v.camera.position.copy(head).addScaledVector(offset,0.35);v.camera.lookAt(head);v.camera.aspect=1280/900;v.camera.updateProjectionMatrix();v.camera.updateMatrixWorld();

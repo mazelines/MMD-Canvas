@@ -10,6 +10,7 @@ struct ShadingContext {
     float3 worldPos;
     float3 normal;       // lighting normal (normal/bump mapped)
     float3 geoNormal;    // geometric normal
+    float3 bentNormal;   // lighting normal plus world-space AO bend; normal when AO is off
     float2 uv;
     float3 viewDir;      // normalized surface -> camera
     float  depth;        // view-space depth (-view.z)
@@ -24,7 +25,7 @@ struct ShadingContext {
     float  ndl;
     float  direct;       // direct term (toon band or Lambert, shadowed)
     float  shade;        // DXR shadow visibility 0..1
-    float3 fill;         // indirect sky/ground fill (lux-scaled)
+    float3 fill;         // directional sky/ground fill before AO (lux-scaled)
     float  ao;           // combined material/screen AO
     float3 sunDir;
     float  sunLux;
@@ -38,6 +39,17 @@ struct ShadingContext {
     // Result (writable)
     float3 color;        // scene-linear lit, before /100
 };
+
+// Broad first-order sky lobe aligned to the sun, not another direct light.
+// 2/3 is the cosine-convolution factor for a linear radiance lobe. Its spherical
+// mean is one and it stays positive even at full directionality. Ambient lux
+// remains independent of sun lux. This is an environment approximation, not GI
+// or an atmospheric scattering model. Bent-normal sampling approximates the
+// visible environment; the caller applies scalar visibility exactly once.
+float3 evaluateAmbient(float3 direction, float skyBlend) {
+    float directional = 1 + (2.0 / 3.0) * saturate(ground.w) * dot(direction, normalize(sun.xyz));
+    return lerp(ground.rgb, sky.rgb, saturate(skyBlend)) * sky.w * directional;
+}
 
 // Screen-space scene depth from the prepass (view-space depth; 0 = background).
 // Lets stack layers sample neighbor depth for depth-based rim/edge effects.

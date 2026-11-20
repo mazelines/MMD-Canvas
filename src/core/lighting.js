@@ -3,6 +3,8 @@ export const DEFAULT_LIGHT_LUX = 10;
 export const MAX_LIGHT_LUX = 200000;
 // Sky/ground fill so faces turned away from the directional light are not pure black.
 export const DEFAULT_AMBIENT_LUX = 2;
+// Broad sky lobe following the directional light; 0 is an undirected sky.
+export const DEFAULT_SKY_DIRECTIONALITY = 0.5;
 // GT7 scene-linear framebuffer convention: 1.0 represents 100 cd/m².
 export const REFERENCE_LUMINANCE = 100;
 export const DEFAULT_EV100 = 0;

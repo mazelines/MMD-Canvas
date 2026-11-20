@@ -12,7 +12,7 @@ import { collectMaterials } from './material-info.js';
 import { ViewportShading } from './viewport-shading.js';
 import { ViewportCORTAO } from './cortao.js';
 import { ModelAnimation, playableClips } from './animation.js';
-import { DEFAULT_LIGHT_LUX, DEFAULT_AMBIENT_LUX, clampLightLux, normalizeExposure, exposureScale } from '../src/core/lighting.js';
+import { DEFAULT_LIGHT_LUX, DEFAULT_AMBIENT_LUX, DEFAULT_SKY_DIRECTIONALITY, clampLightLux, normalizeExposure, exposureScale } from '../src/core/lighting.js';
 
 export const VIEWABLE = ['.pmx', '.fbx', '.glb', '.gltf', '.obj', '.stl', '.ply', '.dae', '.3mf', '.usdz', '.usda', '.usd', '.usdc'];
 
@@ -67,6 +67,7 @@ export class Viewer {
     this.shadow = { enabled: false, softness: 0.03, groundY: 0 };
     this.lightLevel = DEFAULT_LIGHT_LUX;
     this.ambientLevel = DEFAULT_AMBIENT_LUX;
+    this.skyDirectionality = DEFAULT_SKY_DIRECTIONALITY;
 
     // light direction gizmo: a sun icon + rotate handles, like a directional light in an engine editor
     this.lightRig = makeSunIcon();
@@ -148,6 +149,11 @@ export class Viewer {
   setAmbientIntensity(lux) {
     this.ambientLevel = Number.isFinite(lux) ? clampLightLux(lux) : DEFAULT_AMBIENT_LUX;
     this.hemi.intensity = this.ambientLevel;
+    this.requestRender();
+  }
+
+  setSkyDirectionality(value) {
+    this.skyDirectionality = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : DEFAULT_SKY_DIRECTIONALITY;
     this.requestRender();
   }
 

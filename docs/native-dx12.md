@@ -70,15 +70,24 @@ L = albedo / PI * (direct * sunLux + fill * combinedAO) + emission
 colorMain.rgb = L / 100
 ```
 
-`visibilityAt`는 5×5 이웃을 사용합니다. 위치 가중치 `exp(-0.5 * (x*x + y*y))`에 법선 가중치 `saturate(dot(Ncenter, Ni))^8`와 깊이 가중치 `saturate(1 - abs(Zcenter - Zi) / max(radius * 0.1, Zcenter * 0.001))`를 곱합니다. 배경 이웃의 가중치는 0이며, 가중치 합이 0이거나 AO가 비활성화된 경우 가시율은 1입니다.
+`occlusionAt`는 5×5 이웃을 사용합니다. 위치 가중치 `exp(-0.5 * (x*x + y*y))`에 법선 가중치 `saturate(dot(Ncenter, Ni))^8`와 깊이 가중치 `saturate(1 - abs(Zcenter - Zi) / max(radius * 0.1, Zcenter * 0.001))`를 곱합니다. 배경 이웃의 가중치는 0이며, 가중치 합이 0이거나 AO가 비활성화된 경우 가시율은 1입니다.
+
+AO 버퍼는 RGBA16F이며 X에 가시율, YZW에 뷰 공간 bent normal을 저장합니다(기존 R32F보다 픽셀당 4바이트 증가). Bent normal은 가려지지 않은 cosine-weighted 광선들의 평균 방향입니다. 같은 공간 필터에서 `bentNormal - geometricNormal`을 가시율로 가중 평균한 뒤 중심 기하 법선에 더하고 정규화합니다. 완전 개방·완전 차폐·유효하지 않은 방향에는 원래 기하 법선을 사용합니다. AO 강도 0 또는 비활성 상태에서는 방향 보정도 끕니다. 색상 패스에서는 **기하 법선에서 벗어난 방향만** 월드 공간으로 변환해 조명 법선에 더합니다. 프리패스의 삼각형·면 방향이 일치하는 표면에만 사용하므로, 열린 표면에서는 기존 스무딩·노멀맵·범프 조명이 유지됩니다.
+
+AO 입력은 실제 표면의 화면 미분으로 계산한 **기하 법선**과 **32비트 선형 깊이**입니다. 조명용 보간·노멀맵 법선으로 차폐 원판과 탐색 반구를 만들면 평평한 면 자체가 차폐물로 들어올 수 있습니다. 또한 FP16 깊이는 확대/고해상도에서 경사진 면을 계단으로 만들어 acne를 발생시킵니다. 따라서 프리패스 법선·깊이는 RGBA32F로 보관하며, 기존 RGBA16F 대비 픽셀당 8바이트가 증가합니다. 이후 CORTAO의 R32_UINT 압축·밉 체인은 유지합니다. 바이어스를 크게 올리거나 메시 전체를 차폐에서 제외하지 않습니다.
 
 - Lambert의 `direct`는 `max(dot(N, L), 0) * DXRVisibility`입니다.
 - Toon의 `direct`는 `lerp(64/255, band, DXRVisibility)`이며, `band`는 `dot(N, L) < 0`이면 `64/255`, 그 외에는 1입니다.
-- `fill = lerp(groundRGB, skyRGB, t) * ambientLux`이며 `t`는 Lambert에서 `N.y * 0.5 + 0.5`, Toon에서 0.5입니다.
+- `fill = lerp(groundRGB, skyRGB, t) * ambientLux * (1 + 2/3 * skyDirectionality * dot(B, sunDir))`입니다. `B`는 필터링한 월드 공간 bent normal이며 AO가 꺼져 있으면 표면 법선입니다. `t`는 Lambert에서 `B.y * 0.5 + 0.5`, 기본 Toon에서 0.5입니다.
+- `하늘 방향성`은 0–1, 기본값 0.5입니다. 태양 방향과 연동되는 넓은 1차 로브로 환경광을 근사합니다. 로브의 구면 평균 배율은 1이고 최솟값은 1/3입니다. 태양의 **방향**만 공유하며 주변광 lux와 직접광 lux는 독립적입니다. 0은 태양 방향에 무관한 하늘·지면 필이며, bent normal에 따른 하늘·지면 색 선택은 유지됩니다. 실제 대기 산란이나 물체 간 반사광을 계산하는 GI는 아닙니다.
 - `min`은 현재 앱의 재질 AO 결합 정책입니다. 예를 들어 재질 AO 0.8과 화면 AO 0.6은 0.6으로 결합합니다. 재질 AO가 이미 더 어두우면 CORTAO 변화가 화면에 드러나지 않을 수 있습니다.
-- CORTAO는 간접 확산광에만 적용합니다. 직접광의 DXR 그림자·발광에는 곱하지 않습니다. 현재 bent normal과 specular occlusion은 사용하지 않습니다.
+- CORTAO 가시율과 bent normal은 간접 확산광에만 적용합니다. 직접광의 DXR 그림자·발광에는 곱하지 않습니다. Specular occlusion은 아직 사용하지 않습니다.
 
-이 RGB를 HDR 버퍼에 합성하고 DLAA·DLSS 복원 또는 MSAA resolve 후 `outputMain`에서 노출 배율과 GT7, sRGB 변환을 적용합니다. AO Debug View만 `outputMain`에서 가시율을 직접 표시하며 노출·톤매핑을 우회합니다. 번들 `Zhuang Fangyi.canvas`에는 AO 설정이 없어 이전 파일 호환 규칙에 따라 CORTAO가 꺼진 상태로 복원됩니다.
+이 RGB를 HDR 버퍼에 합성하고 DLAA·DLSS 복원 또는 MSAA resolve 후 `outputMain`에서 노출 배율과 GT7, sRGB 변환을 적용합니다. Debug View는 노출·톤매핑을 우회하며 `Bent Normal`은 월드 방향을 `B * 0.5 + 0.5`의 RGB로 표시합니다. 번들 `Zhuang Fangyi.canvas`에는 AO 설정이 없어 이전 파일 호환 규칙에 따라 CORTAO가 꺼진 상태로 복원됩니다.
+
+`npm run test:dx12`는 직접광 0 lux에서 태양 회전에 따른 환경광 변화, 기존 scalar AO와의 비교, 카메라 회전 시 bent normal의 월드 방향, 직접광·발광 보존, DLAA/DLSS를 검증합니다. 비교 PNG는 `tests/out/directional-ambient/`에 저장합니다. `npm run test:shader-stack`은 실제 예제 캐릭터의 Standard·기본 Toon 비교 이미지도 생성합니다.
+
+`npm run test:cortao`는 기울어진/보간된 조명 법선과 노멀맵을 가진 단독 평면, 경사면, 볼록 메시, 0.001–100배 스케일, 2048 해상도를 검사합니다. 원본 AO에는 32광선·압축·밉 샘플링의 미세 노이즈를 허용하되 필터 결과의 acne와 실제 얇은 접촉부 차폐 소실을 검사합니다. 실제 캐릭터의 원본/필터 AO와 결과 수치는 `tests/out/cortao/current/`에 저장됩니다.
 
 ## 지원 범위와 제한
 

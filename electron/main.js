@@ -9,6 +9,7 @@ import { readWorkspace, writeWorkspace, networkPaths } from '../src/core/workspa
 import { Dx12Host } from './dx12.js';
 import { compileShaderStack } from './shader-compiler.js';
 import { libraryStride } from '../src/core/shader-stack.js';
+import { readShaderFile, writeShaderFile, shaderContainer } from '../src/core/shader-file.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Three.js supplies scene/loader data only; browser 3D rendering is disabled.
@@ -167,24 +168,57 @@ function createWindow() {
 // hard step + flat fill) as a stack layer on the neutral Lambert base, with the
 // hull outline enabled; Standard is the plain Lambert base. Users can edit/add.
 const BUILTIN_STACKS = [
-  { name: 'Default Toon', outline: true, layers: [{ id: 'toon', name: 'DefaultToon', enabled: true, code:
+  // Default Toon is itself assembled from separable function layers (ToonBand +
+  // ToonFill), embodying the stack-with-layerable philosophy: the built-in is not a
+  // monolithic blob but a stack of reusable blocks users can reorder/remove/extend.
+  // Two-band direct light and flat sky/ground color, with directional sky fill.
+  { name: 'Default Toon', outline: true, layers: [
+    { id: 'toon-band', name: 'ToonBand', enabled: true, code:
 `//@property float shadowFloor = 0.251 [0,1] "그림자 바닥"
-void DefaultToon(inout ShadingContext ctx) {
+void ToonBand(inout ShadingContext ctx) {
     float band = ctx.ndl < 0 ? shadowFloor : 1.0;
     float toonDirect = lerp(shadowFloor, band, ctx.shade);
     ctx.color += ctx.albedo * (toonDirect - ctx.direct) * ctx.sunLux / 3.141592653589793;
-    float3 flatFill = lerp(ctx.groundColor, ctx.skyColor, 0.5) * ctx.ambientLux;
+}` },
+    { id: 'toon-fill', name: 'ToonFill', enabled: true, code:
+`void ToonFill(inout ShadingContext ctx) {
+    float3 flatFill = evaluateAmbient(ctx.bentNormal, 0.5);
     ctx.color += ctx.albedo * (flatFill - ctx.fill) * ctx.ao / 3.141592653589793;
-}` }] },
+}` },
+  ] },
+  // Standard = the neutral Lambert base shading as-is (empty stack, no outline).
   { name: 'Standard', outline: false, layers: [] },
 ];
-let shaderLibrary = BUILTIN_STACKS.map(s => ({ ...s, layers: s.layers.map(l => ({ ...l })) }));
+// Library entries carry provenance for .shader asset management:
+//   source 'builtin' (in-memory read-only baseline) | 'file' (user .shader on disk)
+//   ref     stable persistence key: 'builtin:<name>' or a relative .shader path
+//   path    absolute disk path (file entries only)
+//   baseline layers snapshot for dirty detection; dirty = edited since baseline
+function builtinEntries() {
+  return BUILTIN_STACKS.map(s => ({
+    name: s.name, outline: s.outline, layers: s.layers.map(l => ({ ...l })),
+    metadata: { tags: [] }, source: 'builtin', ref: `builtin:${s.name}`,
+    baseline: s.layers.map(l => ({ ...l })), dirty: false,
+  }));
+}
+function normalizeEntry(raw) {
+  const layers = Array.isArray(raw?.layers) ? raw.layers.map(l => ({ id: l.id, name: l.name, code: l.code, enabled: l.enabled !== false })) : [];
+  const source = raw?.source === 'builtin' ? 'builtin' : 'file';
+  return {
+    name: raw?.name || 'Shader', outline: !!raw?.outline, layers,
+    metadata: raw?.metadata || { tags: [] }, source,
+    ref: raw?.ref || (source === 'builtin' ? `builtin:${raw?.name}` : null),
+    path: raw?.path || null, baseline: raw?.baseline || layers.map(l => ({ ...l })), dirty: !!raw?.dirty,
+  };
+}
+const entryDirty = (e) => JSON.stringify(e.layers) !== JSON.stringify(e.baseline);
+let shaderLibrary = builtinEntries();
 let materialInstances = []; // panel material index -> { stackId, params:{layerId:{propName:value}} }
 let materialNames = [];     // display names pushed by the main window
-let previewMaterial = 0;    // material whose stack the editor preview sphere shows
+let previewShaderId = 1;    // library shader (stackId) the editor preview sphere shows
 let stackCache = new Map(); // stackId -> { color, aa }
 let stride = 1;             // per-material userParams stride (max stack slot count)
-const previewStackId = () => materialInstances[previewMaterial]?.stackId || 0;
+let shaderDir = null;       // directory holding user .shader files (canvas/model dir + shaders/)
 function openShaderWindow() {
   if (shaderWin && !shaderWin.isDestroyed()) { shaderWin.focus(); return; }
   shaderWin = new BrowserWindow({
@@ -195,7 +229,7 @@ function openShaderWindow() {
   shaderWin.loadURL('app://ui/renderer/shader-stack.html');
   shaderWin.on('closed', () => { previewDx12.stop(); shaderWin = null; });
 }
-function shaderState() { return { library: shaderLibrary, instances: materialInstances, materialNames, stride, previewMaterial }; }
+function shaderState() { return { library: shaderLibrary, instances: materialInstances, materialNames, stride, previewShaderId }; }
 function notifyShaderApplied() {
   // Direct render kick: reliable across the multi-window setup where the IPC
   // event alone may not restart a converged flush. Kick both viewports.
@@ -292,7 +326,7 @@ async function loadShaderLibrary() {
   const stacks = [...stackCache].map(([stackId, b]) => ({ stackId, outline: shaderLibrary[stackId - 1]?.outline ? 1 : 0, color: b.color, aa: b.aa }));
   for (const host of hosts) {
     if (host === previewDx12) {
-      const sel = stackCache.get(previewStackId());
+      const sel = stackCache.get(previewShaderId);
       await host.shader(sel ? sel.color : null, sel ? sel.aa : null);
     } else {
       await host.shaderLibrary(stacks);
@@ -308,22 +342,27 @@ async function applyLibrary() {
   return loadError;
 }
 ipcMain.handle('shader-stack:library-set', async (_e, library) => {
-  shaderLibrary = Array.isArray(library) ? library : [];
+  shaderLibrary = (Array.isArray(library) ? library : []).map(normalizeEntry);
   for (const inst of materialInstances) if (inst.stackId > shaderLibrary.length) inst.stackId = 0;
   const err = await applyLibrary(); broadcastShaderUpdated();
   return err ? { ok: false, error: err } : { ok: true, value: shaderState() };
 });
-ipcMain.handle('shader-stack:restore', async (_e, { library, instances }) => {
-  if (Array.isArray(library) && library.length) shaderLibrary = library;
-  materialInstances = Array.isArray(instances) ? instances.map(i => ({ stackId: (i?.stackId >= 1 && i.stackId <= shaderLibrary.length) ? i.stackId : 1, params: i?.params || {} })) : [];
+ipcMain.handle('shader-stack:restore', async (_e, { instances, shaderFiles, baseDir }) => {
+  setShaderDir(baseDir);
+  await rebuildLibrary(shaderFiles || []);
+  const byRef = new Map();
+  shaderLibrary.forEach((e, i) => { byRef.set(e.ref, i + 1); if (e.path) byRef.set(e.path, i + 1); });
+  materialInstances = (Array.isArray(instances) ? instances : []).map(inst => ({ stackId: byRef.get(inst?.ref) || 1, params: inst?.params || {} }));
   const err = await applyLibrary(); broadcastShaderUpdated();
   return err ? { ok: false, error: err } : { ok: true, value: shaderState() };
 });
 ipcMain.handle('shader-stack:stack-apply', async (_e, { stackId, layers, outline }) => {
   const idx = stackId - 1;
   if (idx < 0 || idx >= shaderLibrary.length) return { ok: false, error: 'Invalid stackId' };
-  shaderLibrary[idx].layers = Array.isArray(layers) ? layers : [];
-  if (outline !== undefined) shaderLibrary[idx].outline = !!outline;
+  const entry = shaderLibrary[idx];
+  entry.layers = Array.isArray(layers) ? layers.map(l => ({ id: l.id, name: l.name, code: l.code, enabled: l.enabled !== false })) : [];
+  if (outline !== undefined) entry.outline = !!outline;
+  entry.dirty = entryDirty(entry);
   const err = await applyLibrary(); broadcastShaderUpdated();
   return err ? { ok: false, error: err } : { ok: true, value: shaderState() };
 });
@@ -331,20 +370,24 @@ ipcMain.handle('shader-stack:stack-apply', async (_e, { stackId, layers, outline
 // renderer re-packs userParams on the next flush; no recompile needed.
 handle('shader-stack:instance-params', ({ materialIndex, values }) => {
   const inst = materialInstances[materialIndex];
-  if (!inst) return { ok: false, error: 'Invalid material' };
-  inst.params = { ...(inst.params || {}), ...(values || {}) };
+  if (!inst) throw new Error('Invalid material');
+  // Deep-merge at prop level so a single-prop patch does not wipe the layer's
+  // other values (the inspector edits one property at a time).
+  const next = { ...(inst.params || {}) };
+  for (const [layerId, layerValues] of Object.entries(values || {})) next[layerId] = { ...(next[layerId] || {}), ...(layerValues || {}) };
+  inst.params = next;
   broadcastShaderUpdated(); notifyShaderApplied();
-  return { ok: true };
+  return shaderState();
 });
 handle('shader-stack:assign', ({ materialIndex, stackId }) => {
   if (materialIndex >= 0) materialInstances[materialIndex] = { stackId, params: materialInstances[materialIndex]?.params || {} };
   broadcastShaderUpdated(); notifyShaderApplied();
-  return { ok: true, value: shaderState() };
+  return shaderState();
 });
-handle('shader-stack:preview', async (materialIndex) => {
-  previewMaterial = materialIndex;
+handle('shader-stack:preview-shader', async (stackId) => {
+  previewShaderId = Number(stackId) || 0;
   if (previewDx12.child && previewDx12.capabilities) {
-    const sel = stackCache.get(previewStackId());
+    const sel = stackCache.get(previewShaderId);
     try { await previewDx12.shader(sel ? sel.color : null, sel ? sel.aa : null); } catch { /* best-effort */ }
   }
   notifyShaderApplied();
@@ -356,6 +399,96 @@ handle('shader-stack:materials', (names) => {
   broadcastShaderUpdated();
   return { ok: true };
 });
+
+// --- .shader library management (discovery, save, delete, dirty) ---
+function setShaderDir(baseDir) { shaderDir = baseDir ? path.join(baseDir, 'shaders') : null; }
+const refForPath = (abs) => shaderDir ? path.relative(path.dirname(shaderDir), abs).split(path.sep).join('/') : abs;
+async function rebuildLibrary(extraRefs = []) {
+  const entries = builtinEntries();
+  const seen = new Set(entries.map(e => e.ref));
+  const files = [];
+  if (shaderDir) {
+    const dirents = await fs.readdir(shaderDir, { withFileTypes: true }).catch(() => []);
+    for (const d of dirents) if (d.isFile() && path.extname(d.name).toLowerCase() === '.shader') files.push(path.join(shaderDir, d.name));
+  }
+  for (const ref of extraRefs) if (typeof ref === 'string' && !ref.startsWith('builtin:') && !files.includes(ref)) files.push(ref);
+  files.sort();
+  for (const f of files) {
+    try {
+      const c = await readShaderFile(f);
+      const ref = refForPath(f);
+      if (seen.has(ref)) continue;
+      seen.add(ref);
+      entries.push({ name: c.name, outline: c.outline, layers: c.layers, metadata: c.metadata, source: 'file', ref, path: f, baseline: c.layers.map(l => ({ ...l })), dirty: false });
+    } catch { /* skip invalid .shader */ }
+  }
+  shaderLibrary = entries;
+}
+handle('shader-stack:set-dir', async (baseDir) => {
+  setShaderDir(baseDir);
+  await rebuildLibrary();
+  for (const inst of materialInstances) if (inst.stackId > shaderLibrary.length) inst.stackId = 1;
+  await applyLibrary(); broadcastShaderUpdated();
+  return shaderState();
+});
+// Write the selected entry to a .shader file. A modified builtin is exported as a
+// NEW user file (user-chosen path) and the builtin baseline is restored.
+async function saveEntryCore(stackId, saveAs) {
+  const idx = stackId - 1;
+  const entry = shaderLibrary[idx];
+  if (!entry) throw new Error('Invalid stackId');
+  const container = shaderContainer(entry);
+  let target = (entry.source === 'file' && entry.path && !saveAs) ? entry.path : null;
+  if (!target) {
+    const name = (container.name || 'Shader').replace(/[^\w가-힣.-]+/g, '_');
+    const sel = await dialog.showSaveDialog(win, { defaultPath: path.join(shaderDir || app.getPath('documents'), `${name}.shader`), filters: [{ name: t('셰이더'), extensions: ['shader'] }] });
+    if (sel.canceled || !sel.filePath) return null;
+    target = sel.filePath;
+    if (path.extname(target).toLowerCase() !== '.shader') target += '.shader';
+  }
+  await writeShaderFile(target, container);
+  const ref = refForPath(target);
+  let selected = stackId;
+  if (entry.source === 'builtin') {
+    entry.layers = entry.baseline.map(l => ({ ...l })); entry.outline = BUILTIN_STACKS[idx]?.outline ?? entry.outline; entry.dirty = false;
+    shaderLibrary.push({ name: container.name, outline: container.outline, layers: container.layers, metadata: container.metadata, source: 'file', ref, path: target, baseline: container.layers.map(l => ({ ...l })), dirty: false });
+    selected = shaderLibrary.length;
+    for (const inst of materialInstances) if (inst.stackId === stackId) inst.stackId = selected;
+  } else {
+    entry.path = target; entry.ref = ref; entry.source = 'file'; entry.baseline = container.layers.map(l => ({ ...l })); entry.dirty = false;
+  }
+  previewShaderId = selected;
+  await applyLibrary(); broadcastShaderUpdated();
+  return { state: shaderState(), stackId: selected };
+}
+handle('shader-stack:save-entry', async ({ stackId, saveAs }) => saveEntryCore(stackId, saveAs));
+handle('shader-stack:delete-entry', async ({ stackId }) => {
+  const idx = stackId - 1;
+  const entry = shaderLibrary[idx];
+  if (!entry || entry.source === 'builtin') throw new Error('Cannot delete a built-in shader');
+  if (entry.path) await fs.rm(entry.path, { force: true }).catch(() => {});
+  shaderLibrary.splice(idx, 1);
+  for (const inst of materialInstances) { if (inst.stackId === stackId) inst.stackId = 1; else if (inst.stackId > stackId) inst.stackId -= 1; }
+  if (previewShaderId === stackId) previewShaderId = 1; else if (previewShaderId > stackId) previewShaderId -= 1;
+  await applyLibrary(); broadcastShaderUpdated();
+  return shaderState();
+});
+handle('shader:dirty', () => shaderLibrary.map((e, i) => ({ e, id: i + 1 })).filter(x => x.e.dirty).map(x => ({ stackId: x.id, name: x.e.name, source: x.e.source, ref: x.e.ref })));
+// Prompt to save modified shaders before the project closes; the user picks paths.
+async function promptSaveDirtyShaders() {
+  const dirty = shaderLibrary.map((e, i) => ({ e, id: i + 1 })).filter(x => x.e.dirty);
+  if (!dirty.length) return;
+  const ans = await dialog.showMessageBox(win, {
+    type: 'question', buttons: [t('저장'), t('저장 안 함')], defaultId: 0, cancelId: 1, title: t('셰이더 저장'),
+    message: t('수정된 셰이더가 있습니다. .shader 파일로 저장하시겠습니까?'), detail: dirty.map(x => x.e.name).join('\n'),
+  });
+  if (ans.response !== 0) {
+    for (const { e } of dirty) { e.layers = e.baseline.map(l => ({ ...l })); e.dirty = false; }
+    await applyLibrary(); broadcastShaderUpdated();
+    return;
+  }
+  for (const { id } of dirty) { await saveEntryCore(id, true).catch(() => {}); }
+}
 
 handle('app:startup', async () => {
   rendererReady = true;
@@ -404,6 +537,34 @@ handle('fs:stat', async (p) => {
   return { isDir: st.isDirectory(), size: st.size };
 });
 
+// --- .shader asset file I/O (shaders live on disk; the canvas stores references) ---
+handle('shader:read', async (filePath) => readShaderFile(filePath));
+handle('shader:list', async (dir) => {
+  const resolved = path.resolve(dir);
+  const dirents = await fs.readdir(resolved, { withFileTypes: true }).catch(() => []);
+  const files = dirents.filter(d => d.isFile() && path.extname(d.name).toLowerCase() === '.shader').map(d => path.join(resolved, d.name)).sort();
+  const out = [];
+  for (const f of files) { try { out.push({ path: f, container: await readShaderFile(f) }); } catch { /* skip invalid */ } }
+  return out;
+});
+handle('shader:save', async ({ container, filePath, saveAs, defaultDir }) => {
+  let target = filePath;
+  if (!target || saveAs) {
+    const name = (container?.name || 'Shader').replace(/[^\w가-힣.-]+/g, '_');
+    const defaultPath = path.join(defaultDir || shaderDir || app.getPath('documents'), `${name}.shader`);
+    const selected = await dialog.showSaveDialog(win, { defaultPath, filters: [{ name: t('셰이더'), extensions: ['shader'] }] });
+    if (selected.canceled || !selected.filePath) return null;
+    target = selected.filePath;
+    if (path.extname(target).toLowerCase() !== '.shader') target += '.shader';
+  }
+  return { filePath: await writeShaderFile(target, container) };
+});
+handle('shader:delete', async (filePath) => {
+  if (path.extname(filePath).toLowerCase() !== '.shader') throw new Error('Not a .shader file');
+  await fs.rm(filePath, { force: true });
+  return { ok: true };
+});
+
 handle('dialog:pickFolder', async (defaultPath) => {
   const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'], defaultPath: defaultPath || undefined });
   return r.canceled ? null : r.filePaths[0];
@@ -423,6 +584,8 @@ handle('dialog:openFile', async (defaultPath) => {
 });
 
 handle('workspace:open', async (filePath) => {
+  // Opening another project closes the current one: offer to save modified shaders.
+  await promptSaveDirtyShaders();
   if (!filePath) {
     const selected = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: t('MMD Canvas 워크스페이스'), extensions: ['canvas'] }] });
     if (selected.canceled) return null;

@@ -12,6 +12,28 @@ export const PROPERTY_TYPES = ['float', 'float2', 'float3', 'float4', 'int', 'bo
 const TYPE_RE = /^\/\/@property\s+(float4|float3|float2|float|int|bool|color)\s+([A-Za-z_]\w*)\s*=\s*(.*)$/;
 const FUNC_RE = /void\s+([A-Za-z_]\w*)\s*\(\s*inout\s+ShadingContext\s+\w+\s*\)/;
 
+// Upgrade only the exact shipped Toon fill, including the older single-layer
+// DefaultToon. Edited/custom shader code, IDs and material parameters survive.
+export function migrateBuiltinSky(library) {
+  const oldFill = 'lerp(ctx.groundColor, ctx.skyColor, 0.5) * ctx.ambientLux';
+  const fillBody = `    float3 flatFill = ${oldFill};
+    ctx.color += ctx.albedo * (flatFill - ctx.fill) * ctx.ao / 3.141592653589793;`;
+  const originals = [
+    `void ToonFill(inout ShadingContext ctx) {\n${fillBody}\n}`,
+    `//@property float shadowFloor = 0.251 [0,1] "그림자 바닥"
+void DefaultToon(inout ShadingContext ctx) {
+    float band = ctx.ndl < 0 ? shadowFloor : 1.0;
+    float toonDirect = lerp(shadowFloor, band, ctx.shade);
+    ctx.color += ctx.albedo * (toonDirect - ctx.direct) * ctx.sunLux / 3.141592653589793;
+${fillBody}
+}`,
+  ];
+  return library.map(stack => stack.name !== 'Default Toon' ? stack : {
+    ...stack, layers: (stack.layers || []).map(layer => originals.includes(layer.code?.replace(/\r\n/g, '\n').trim())
+      ? { ...layer, code: layer.code.replace(oldFill, 'evaluateAmbient(ctx.bentNormal, 0.5)') } : layer),
+  });
+}
+
 function parseColorHex(str) {
   const m = /^#([0-9a-fA-F]{6})$/.exec(str.trim());
   if (!m) return null;

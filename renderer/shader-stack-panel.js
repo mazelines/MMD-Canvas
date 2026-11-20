@@ -1,5 +1,5 @@
 import { t } from '../src/i18n/index.js';
-import { parseLayer, parseStack } from '../src/core/shader-stack.js';
+import { renderShaderProperties } from './shader-properties.js';
 
 const node = (tag, props = {}, ...children) => {
   const element = Object.assign(document.createElement(tag), props);
@@ -56,21 +56,24 @@ const BLANK_TEMPLATE = { name: 'Custom', code: `void Custom(inout ShadingContext
 let nextId = 1;
 const makeLayer = (name, code) => ({ id: `layer-${nextId++}`, name, code, enabled: true });
 
-// Unity-like material shader editor: a library of shader stacks, per-material
-// assignment, and per-material instance property values. stackId = library index+1;
-// 0 = base. Properties edited here belong to the selected MATERIAL instance.
+// Pure shader-library authoring tool: edit built-in and user shaders as stacks of
+// HLSL functions, save/manage them, and preview the SELECTED shader on a sphere.
+// stackId = library index+1; 0 = base. No per-material assignment or instance values
+// here — those live in the material inspector. The property panel previews the
+// selected shader with code-defined defaults (preview-only, not persisted).
 export class ShaderStackPanel {
   constructor() {
     this.$ = id => document.getElementById(id);
-    this.library = []; this.instances = []; this.materialNames = []; this.stride = 1;
-    this.selectedMaterial = 0; this.selectedStack = 0;
+    this.library = []; this.stride = 1;
+    this.selectedStack = 1; this.previewValues = {}; this.onPreviewChange = null;
     this.selected = -1; this.editor = null; this.applying = false; this.dragIndex = -1; this.popup = null;
     this.$('shader-add').addEventListener('click', () => this.insertLayer(this.stack.length, SHADER_EXAMPLES[this.stack.length % SHADER_EXAMPLES.length]));
     this.$('shader-reset').addEventListener('click', () => { if (this.selectedStack < 1) return; this.library[this.selectedStack - 1].layers = []; this.selected = -1; this.render(); this.apply(); });
     this.$('shader-apply').addEventListener('click', () => this.apply());
     this.$('shader-library-add').addEventListener('click', () => this.addStack());
-    this.$('shader-material').addEventListener('change', e => this.selectMaterial(Number(e.target.value)));
-    this.$('shader-material-stack').addEventListener('change', e => this.assignStack(Number(e.target.value)));
+    this.$('shader-save').addEventListener('click', () => this.saveStack(false));
+    this.$('shader-save-as').addEventListener('click', () => this.saveStack(true));
+    this.$('shader-outline').addEventListener('change', e => { if (this.selectedStack < 1) return; this.library[this.selectedStack - 1].outline = e.target.checked; this.apply(); });
     document.addEventListener('keydown', (ev) => {
       if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;
       const el = document.activeElement;
@@ -84,61 +87,60 @@ export class ShaderStackPanel {
   }
 
   get stack() { return this.selectedStack >= 1 ? (this.library[this.selectedStack - 1]?.layers || []) : []; }
-  get instance() { return this.instances[this.selectedMaterial] || { stackId: 0, params: {} }; }
 
   async load() { this.setState(await window.api.shaderStackLibraryGet()); }
   setState(state) {
-    this.library = state.library || []; this.instances = state.instances || []; this.materialNames = state.materialNames || []; this.stride = state.stride || 1;
-    if (this.selectedMaterial >= this.materialNames.length) this.selectedMaterial = 0;
-    this.selectedStack = this.instance.stackId || 0;
-    if (this.selectedStack > this.library.length) this.selectedStack = 0;
+    this.library = state.library || []; this.stride = state.stride || 1;
+    // Library selection is independent of material assignments: preserve it across
+    // broadcasts (which may originate from the main window's material edits).
+    if (this.selectedStack > this.library.length) this.selectedStack = this.library.length;
     this.render();
   }
 
-  selectMaterial(i) {
-    this.selectedMaterial = i; this.selectedStack = this.instance.stackId || 0; this.selected = -1;
-    window.api.shaderStackPreview(i).catch(() => {});
+  selectStack(stackId) {
+    this.selectedStack = stackId; this.selected = -1; this.previewValues = {};
     this.render();
+    window.api.shaderStackPreviewShader(stackId).catch(() => {});
+    this.onPreviewChange?.();
   }
-  assignStack(stackId) {
-    window.api.shaderStackAssign(this.selectedMaterial, stackId).catch(() => {});
-    this.selectedStack = stackId; this.selected = -1;
-    window.api.shaderStackPreview(this.selectedMaterial).catch(() => {});
-    this.render();
-  }
-  selectStack(stackId) { this.selectedStack = stackId; this.selected = -1; this.render(); }
   async addStack() {
-    this.library.push({ name: `${t('스택')} ${this.library.length + 1}`, outline: false, layers: [] });
-    this.selectedStack = this.library.length; this.selected = -1;
-    try { await window.api.shaderStackLibrarySet(this.library); } catch (e) { this.setError(e.message); }
-    this.render();
+    this.library.push({ name: `${t('스택')} ${this.library.length + 1}`, outline: false, layers: [], source: 'file', ref: null, path: null, metadata: { tags: [] } });
+    try { const st = await window.api.shaderStackLibrarySet(this.library); if (st?.library) this.library = st.library; } catch (e) { this.setError(e.message); }
+    this.selectStack(this.library.length);
   }
   async deleteStack(stackId) {
-    this.library.splice(stackId - 1, 1);
-    for (const inst of this.instances) { if (inst.stackId === stackId) inst.stackId = 0; else if (inst.stackId > stackId) inst.stackId -= 1; }
-    if (this.selectedStack === stackId) this.selectedStack = 0; else if (this.selectedStack > stackId) this.selectedStack -= 1;
-    try { await window.api.shaderStackLibrarySet(this.library); } catch (e) { this.setError(e.message); }
-    this.render();
+    const entry = this.library[stackId - 1];
+    if (!entry) return;
+    if (entry.source === 'builtin') { this.setError(t('빌트인 셰이더는 삭제할 수 없습니다.')); return; }
+    try { const st = await window.api.shaderStackDeleteEntry(stackId); if (st?.library) { this.library = st.library; this.selectedStack = Math.min(this.selectedStack, this.library.length); } } catch (e) { this.setError(e.message); }
+    this.previewValues = {}; this.selected = -1; this.render();
+    window.api.shaderStackPreviewShader(this.selectedStack).catch(() => {});
+    this.onPreviewChange?.();
+  }
+  async saveStack(saveAs = false) {
+    if (this.selectedStack < 1) return;
+    try {
+      const r = await window.api.shaderStackSaveEntry(this.selectedStack, saveAs);
+      if (!r) return; // user canceled the save dialog
+      if (r.state?.library) this.library = r.state.library;
+      this.selectStack(r.stackId || this.selectedStack);
+      this.$('shader-status').textContent = t('저장됨');
+    } catch (e) { this.setError(e.message); }
   }
 
   render() {
-    this.renderMaterialSelector();
     this.renderLibrary();
     this.$('shader-stack-name').textContent = this.selectedStack >= 1 ? (this.library[this.selectedStack - 1]?.name || '') : t('기본 셰이딩');
+    this.renderOutlineToggle();
     this.renderStack();
     this.renderEditor();
     this.renderProperties();
   }
 
-  renderMaterialSelector() {
-    const mat = this.$('shader-material');
-    mat.replaceChildren(...this.materialNames.map((name, i) => node('option', { value: i, textContent: `${String(i + 1).padStart(2, '0')} ${name || t('(이름 없음)')}` })));
-    if (!this.materialNames.length) mat.append(node('option', { value: 0, textContent: t('열린 모델 없음') }));
-    mat.value = String(this.selectedMaterial);
-    const stackSel = this.$('shader-material-stack');
-    stackSel.replaceChildren(node('option', { value: 0, textContent: t('기본 셰이딩') }),
-      ...this.library.map((s, i) => node('option', { value: i + 1, textContent: s.name })));
-    stackSel.value = String(this.instance.stackId || 0);
+  renderOutlineToggle() {
+    const cb = this.$('shader-outline');
+    cb.disabled = this.selectedStack < 1;
+    cb.checked = this.selectedStack >= 1 ? !!this.library[this.selectedStack - 1]?.outline : false;
   }
 
   renderLibrary() {
@@ -148,12 +150,15 @@ export class ShaderStackPanel {
     this.library.forEach((s, i) => {
       const stackId = i + 1;
       const row = node('li', { className: stackId === this.selectedStack ? 'active' : '' });
-      const users = this.instances.filter(a => a.stackId === stackId).length;
-      const select = node('button', { className: 'shader-select', textContent: `${s.outline ? '◉ ' : ''}${s.name} (${users})`, ariaPressed: String(stackId === this.selectedStack) });
+      const mark = `${s.outline ? '◉ ' : ''}${s.dirty ? '● ' : ''}${s.name}`;
+      const select = node('button', { className: 'shader-select', textContent: mark, title: s.source === 'builtin' ? t('빌트인') : (s.ref || t('저장 안 됨')), ariaPressed: String(stackId === this.selectedStack) });
       select.addEventListener('click', () => this.selectStack(stackId));
-      const del = node('button', { className: 'link', textContent: '✕', title: t('삭제') });
-      del.addEventListener('click', () => this.deleteStack(stackId));
-      row.append(select, del);
+      row.append(select);
+      if (s.source !== 'builtin') {
+        const del = node('button', { className: 'link', textContent: '✕', title: t('삭제') });
+        del.addEventListener('click', () => this.deleteStack(stackId));
+        row.append(del);
+      }
       list.append(row);
     });
   }
@@ -218,7 +223,7 @@ export class ShaderStackPanel {
       b.addEventListener('click', () => this.openCatalog(index, b));
       return b;
     };
-    if (this.selectedStack < 1) { list.append(node('li', { className: 'material-empty', textContent: t('기본 셰이딩입니다. 스택을 추가/할당하세요.') })); return; }
+    if (this.selectedStack < 1) { list.append(node('li', { className: 'material-empty', textContent: t('기본 셰이딩입니다. 스택을 추가하세요.') })); return; }
     if (!this.stack.length) { list.append(node('li', { className: 'material-empty', textContent: t('+ 를 눌러 셰이더 레이어를 쌓으세요.') })); list.append(insertButton(0)); return; }
     this.stack.forEach((layer, i) => {
       list.append(insertButton(i));
@@ -264,66 +269,23 @@ export class ShaderStackPanel {
     if (this.editor.getValue() !== layer.code) this.editor.setValue(layer.code);
   }
 
-  // Properties belong to the selected MATERIAL instance (Unity-style), not the
-  // shared stack. Values are stored in instances[selectedMaterial].params.
+  // Preview-only properties for the SELECTED library shader. Values are transient
+  // (previewValues), initialized from code defaults, and reset on shader switch.
+  // Per-material instance values are edited in the material inspector, not here.
   renderProperties() {
-    const host = this.$('shader-properties');
-    host.replaceChildren();
-    const layer = this.stack[this.selected];
-    if (!layer) { host.append(node('div', { className: 'muted', textContent: t('레이어를 선택하세요.') })); return; }
-    const info = parseLayer(layer.code);
-    if (info.errors.length) host.append(node('div', { className: 'shader-error', textContent: info.errors.join('\n') }));
-    if (!info.properties.length) { host.append(node('div', { className: 'muted', textContent: t('//@property 주석으로 파라미터를 선언하세요.') })); return; }
-    const inst = this.instance;
-    const layerParams = inst.params?.[layer.id] || {};
-    for (const prop of info.properties) {
-      const value = layerParams[prop.name] !== undefined ? layerParams[prop.name] : prop.default;
-      const row = node('label', { className: 'shader-prop-row', title: prop.label });
-      row.append(node('span', { textContent: prop.label }));
-      const commit = v => { this.setInstanceParam(layer.id, prop.name, v); };
-      if (prop.type === 'bool') {
-        const input = node('input', { type: 'checkbox', checked: !!value });
-        input.addEventListener('change', () => commit(input.checked ? 1 : 0));
-        row.append(input);
-      } else if (prop.type === 'color' || prop.type === 'float3') {
-        const arr = Array.isArray(value) ? value : [0, 0, 0];
-        const hex = '#' + arr.slice(0, 3).map(c => Math.round(Math.max(0, Math.min(1, c)) * 255).toString(16).padStart(2, '0')).join('');
-        const input = node('input', { type: 'color', value: hex });
-        input.addEventListener('input', () => { const n = parseInt(input.value.slice(1), 16); commit([((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]); });
-        row.append(input);
-      } else if (prop.type === 'float' || prop.type === 'int') {
-        if (prop.min !== null && prop.max !== null) {
-          const range = node('input', { type: 'range', min: prop.min, max: prop.max, step: prop.type === 'int' ? 1 : 0.01, value });
-          const out = node('output', { textContent: String(value) });
-          range.addEventListener('input', () => { out.textContent = range.value; commit(Number(range.value)); });
-          row.append(range, out);
-        } else {
-          const input = node('input', { type: 'number', value, step: prop.type === 'int' ? 1 : 0.01 });
-          input.addEventListener('change', () => commit(Number(input.value)));
-          row.append(input);
-        }
-      } else {
-        const arr = Array.isArray(value) ? value : [];
-        const input = node('input', { type: 'text', value: arr.join(', '), spellcheck: false });
-        input.addEventListener('change', () => commit(input.value.split(',').map(s => Number(s.trim()) || 0)));
-        row.append(input);
-      }
-      host.append(row);
-    }
-  }
-
-  setInstanceParam(layerId, propName, value) {
-    const inst = this.instances[this.selectedMaterial];
-    if (!inst) return;
-    inst.params = inst.params || {};
-    inst.params[layerId] = { ...(inst.params[layerId] || {}), [propName]: value };
-    window.api.shaderStackInstanceParams(this.selectedMaterial, { [layerId]: { [propName]: value } }).catch(e => this.setError(e.message));
+    renderShaderProperties(this.$('shader-properties'), this.stack, this.previewValues, (layerId, propName, value) => {
+      this.previewValues[layerId] = { ...(this.previewValues[layerId] || {}), [propName]: value };
+      this.onPreviewChange?.();
+    });
   }
 
   setError(message) { const box = this.$('shader-error'); box.hidden = !message; box.textContent = message || ''; }
 
   async apply() {
-    if (this.applying || this.selectedStack < 1) return;
+    if (this.selectedStack < 1) return;
+    // Coalesce rapid edits: if a compile is running, queue a re-apply so the latest
+    // state (e.g. a quick outline toggle) is never dropped.
+    if (this.applying) { this.pendingApply = true; return; }
     this.applying = true;
     this.$('shader-status').textContent = t('컴파일 중…');
     try {
@@ -336,5 +298,6 @@ export class ShaderStackPanel {
       this.$('shader-status').textContent = t('컴파일 오류');
     }
     this.applying = false;
+    if (this.pendingApply) { this.pendingApply = false; this.apply(); }
   }
 }

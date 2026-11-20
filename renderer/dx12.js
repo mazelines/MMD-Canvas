@@ -169,11 +169,11 @@ export class Dx12Viewport {
     const conversion = new THREE.Matrix4().set(1,0,0,0,0,1,0,0,0,0,0.5,0.5,0,0,0,1);
     projection.premultiply(conversion); f.set(projection.elements,16);
     const sun=v.sun.position.clone().normalize(); f.set([...sun.toArray(),v.lightLevel],32);
-    f.set([...v.hemi.color.toArray(),v.ambientLevel],36);f.set([...v.hemi.groundColor.toArray(),0],40);
+    f.set([...v.hemi.color.toArray(),v.ambientLevel],36);f.set([...v.hemi.groundColor.toArray(),v.skyDirectionality],40);
     const ratio=Math.min(window.devicePixelRatio,2),size=new THREE.Vector2(Math.max(1,Math.round(v.container.clientWidth*ratio)),Math.max(1,Math.round(v.container.clientHeight*ratio))); const scale=Math.min(1,2048/Math.max(size.x,size.y));
     f.set([Math.max(1,Math.round(size.x*scale)),Math.max(1,Math.round(size.y*scale)),v.shadow.softness,v.cortao.modelSize*v.cortao.settings.radius/100],44);
     f.set([v.exposureMultiplier,0,v.shadow.enabled?1:0,v.cortao.settings.enabled&&!v.flags.wireframe?1:0],48);
-    f.set([v.cortao.settings.intensity,v.cortao.debugView==='raw'?2:v.cortao.debugView==='ao'?1:0,this.shadowSamples,v.flags.wireframe?1:0],52);
+    f.set([v.cortao.settings.intensity,v.cortao.debugView==='bent'?3:v.cortao.debugView==='raw'?2:v.cortao.debugView==='ao'?1:0,this.shadowSamples,v.flags.wireframe?1:0],52);
     f.set([...v.scene.background.toArray(),v.flags.grid?1:0],56);f.set([v.shadow.groundY,10,v.cortao.modelSize,v.outlineSettings.width],60);
     f[63] *= size.x * scale / v.container.clientWidth;
     const outline=new THREE.Color(v.outlineSettings.color);

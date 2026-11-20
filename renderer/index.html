@@ -77,6 +77,7 @@
         <label title="EV100을 높이면 화면이 어두워집니다.">EV100 <input id="exposure-ev100" type="number" min="-10" max="24" step="0.1" value="0" aria-label="노출 EV100"></label>
         <label title="양수는 밝게, 음수는 어둡게 보정합니다.">보정 <input id="exposure-compensation" type="number" min="-10" max="10" step="0.1" value="0" aria-label="노출 보정 EV"><span>EV</span></label>
         <label title="주변광 조도 (lux) — 방향광이 닿지 않는 면을 밝히는 하늘·바닥 빛. 0이면 검게 나옵니다.">주변광 <input id="light-ambient-number" type="number" min="0" max="200000" step="0.01" value="2" aria-label="주변광 조도 (lux)"><span>lux</span></label>
+        <label title="태양 방향으로 하늘빛이 치우치는 정도입니다. 0은 균일, 1은 최대이며 주변광이 있을 때 보입니다.">하늘 방향성 <input id="sky-directionality" type="number" min="0" max="1" step="0.1" value="0.5" aria-label="하늘 방향성"></label>
         <button id="exposure-reset" title="노출 기본값 복원" aria-label="노출 기본값 복원">↺</button>
       </div>
       <div class="viewport-modes" role="group" aria-label="뷰포트 렌더링 모드">
@@ -85,7 +86,7 @@
           <div class="cortao-heading"><label class="toggle" title="틈과 접촉부의 주변광을 줄여 입체감을 더합니다."><input id="cortao-enabled" type="checkbox" checked>CORTAO</label><button id="cortao-reset" title="CORTAO 기본값 복원" aria-label="CORTAO 기본값 복원">↺</button></div>
           <label class="cortao-row" for="cortao-intensity"><span>강도</span><input id="cortao-intensity" type="number" min="0" max="2" step="0.1" value="1" aria-label="CORTAO 강도"></label>
           <label class="cortao-row" for="cortao-radius" title="모델 크기에 대한 탐색 반경의 비율입니다."><span>범위</span><input id="cortao-radius" type="number" min="0.1" max="10" step="0.1" value="2" aria-label="CORTAO 범위"><span>%</span></label>
-          <label class="cortao-row cortao-debug-row" for="cortao-debug"><span>Debug View</span><select id="cortao-debug" aria-label="CORTAO Debug View"><option value="off">일반 렌더링</option><option value="ao">AO만 보기</option><option value="raw">필터 전 AO</option></select></label>
+          <label class="cortao-row cortao-debug-row" for="cortao-debug"><span>Debug View</span><select id="cortao-debug" aria-label="CORTAO Debug View"><option value="off">일반 렌더링</option><option value="ao">AO만 보기</option><option value="raw">필터 전 AO</option><option value="bent">Bent Normal</option></select></label>
           <p id="cortao-debug-hint" class="cortao-debug-hint" aria-live="polite" hidden></p>
         </section>
         <section id="toon-settings" class="toon-settings" aria-label="아웃라인 설정">

@@ -91,12 +91,12 @@
       },
       {
         "name": "M_eyeshadow_common_05",
-        "visible": true,
+        "visible": false,
         "emissiveNits": null
       },
       {
         "name": "M_hairshadow_common_01",
-        "visible": true,
+        "visible": false,
         "emissiveNits": null
       },
       {
@@ -269,13 +269,18 @@
     ]
   },
   "viewport": {
+    "cortao": {
+      "enabled": true,
+      "intensity": 1,
+      "radius": 3
+    },
     "exposure": {
       "ev100": 0,
       "compensation": 0
     },
-    "mode": "toon",
+    "mode": "lambert",
     "outline": {
-      "width": 1.6,
+      "width": 1.2,
       "color": "#331b36"
     },
     "flags": {
@@ -285,10 +290,11 @@
     },
     "lightUnit": "lux",
     "lightIntensity": 10,
-    "ambientIntensity": 6,
+    "ambientIntensity": 3,
+    "skyDirectionality": 1,
     "lightDirection": [
-      -0.01423255508521988,
-      0.2519420795222242,
+      -0.014232555085219895,
+      0.2519420795222243,
       0.9676376506429271
     ],
     "shadowEnabled": true,
@@ -303,14 +309,14 @@
     ],
     "camera": {
       "position": [
-        0.3706470558358197,
-        15.68743373518386,
-        37.68309556287797
+        -5.941714384834124,
+        18.837625078349635,
+        11.877330316933914
       ],
       "target": [
-        0.7326591449070192,
-        11.750693425374156,
-        0.16524753640393863
+        0.21122485470721247,
+        18.616601879857456,
+        -0.16398558861822032
       ],
       "up": [
         0,
@@ -322,7 +328,151 @@
       "near": 0.2694456569091414,
       "far": 2694.456569091414,
       "maxDistance": 1077.7826276365656
-    }
+    },
+    "materialInstances": [
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {
+          "toon-band": {
+            "shadowFloor": 0.15
+          }
+        }
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {
+          "toon-band": {
+            "shadowFloor": 0.06
+          },
+          "layer-2": {
+            "width": 0.54,
+            "bias": 0.07,
+            "fade": 0.14,
+            "intensity": 0.66
+          }
+        }
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {}
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {
+          "toon-band": {
+            "shadowFloor": 0.05
+          },
+          "layer-2": {
+            "width": 0.56
+          }
+        }
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {}
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {
+          "layer-2": {
+            "width": 0
+          }
+        }
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {
+          "layer-2": {
+            "width": 0.05,
+            "intensity": 0.11
+          }
+        }
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {}
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {}
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {}
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {}
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {}
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {
+          "layer-2": {
+            "width": 0.27,
+            "intensity": 0.2,
+            "bias": 0.05,
+            "fade": 0.09
+          }
+        }
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {
+          "layer-2": {
+            "width": 0.43,
+            "intensity": 0.52
+          }
+        }
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {
+          "layer-2": {
+            "width": 0.17,
+            "bias": 0.04
+          }
+        }
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {}
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {}
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {}
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {}
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {}
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {}
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {}
+      },
+      {
+        "ref": "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader",
+        "params": {}
+      }
+    ],
+    "shaderFiles": [
+      "C:/Users/Administrator/Downloads/Zhuang Fangyi/Default_Toon.shader"
+    ]
   },
   "conversion": {
     "mode": "single",
@@ -337,10 +487,10 @@
     "recursive": false
   },
   "inspector": {
-    "tab": "overview",
-    "selectedMaterial": 0,
+    "tab": "materials",
+    "selectedMaterial": 5,
     "filter": "",
     "soloVisibility": null
   },
-  "savedAt": "2026-11-11T15:38:44.178Z"
+  "savedAt": "2026-11-20T02:55:40.498Z"
 }
