@@ -10,6 +10,10 @@ PMX（MMD）モデルをプレビューし、**FBX / USD に変換**するデス
 
 [ダウンロード](https://github.com/mazelines/MMD-Canvas/releases) · [CI 結果](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [リリースガイド（韓国語）](releases.md)
 
+## v0.8.3：同梱サンプルの DepthRim 設定調整
+
+同梱 Zhuang Fangyi サンプルの23マテリアルに、DepthRimLight **幅 0.81、深度しきい値 0.01、遷移幅 0.04、強度 1.05、リム色は白**を統一して適用しました。[0.8.3 の変更](release-notes/v0.8.3.md)。
+
 ## v0.8.2：更新通知と DepthRim の修正
 
 起動時と実行中の6時間ごとに正式版の更新を確認し、ダウンロードリンク付きの通知を表示します。閉じたバージョンの通知は再表示せず、通信エラーは作業を妨げません。初回起動には閉じることができる GitHub スターの案内も表示します。

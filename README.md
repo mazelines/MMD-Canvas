@@ -10,6 +10,10 @@ PMX(MMD) 모델을 미리 보고 **FBX / USD로 변환**하는 데스크톱 앱�
 
 [배포 파일 다운로드](https://github.com/mazelines/MMD-Canvas/releases) · [CI 실행 결과](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [릴리스 가이드](docs/releases.md)
 
+## v0.8.3: 번들 예제 DepthRim 설정 조정
+
+번들 Zhuang Fangyi 예제의 23개 머티리얼에 DepthRimLight **림 폭 0.81 · 깊이 임계값 0.01 · 전이 폭 0.04 · 강도 1.05 · 흰색**을 동일하게 적용했습니다. [0.8.3 변경 내용](docs/release-notes/v0.8.3.md).
+
 ## v0.8.2: 업데이트 알림과 DepthRim 수정
 
 시작 시와 실행 중 6시간마다 새 정식 버전을 확인하고, 다운로드 링크가 있는 알림을 표시합니다. 닫은 버전은 다시 알리지 않으며 네트워크 오류는 작업을 방해하지 않습니다. 첫 실행에는 닫을 수 있는 GitHub 별 주기 안내도 표시합니다.
