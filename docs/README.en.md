@@ -10,6 +10,10 @@ A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
 
+## v0.8.3: Bundled example DepthRim settings
+
+All 23 materials in the bundled Zhuang Fangyi example now use DepthRimLight **width 0.81, depth bias 0.01, fade 0.04, intensity 1.05 and white rim color**. [0.8.3 changes](release-notes/v0.8.3.md).
+
 ## v0.8.2: Update notifications and DepthRim fixes
 
 The app checks for new stable releases at startup and every six hours, with a dismissible download notification. Dismissal is remembered for that version and network failures stay silent. A dismissible GitHub star suggestion appears on first launch.

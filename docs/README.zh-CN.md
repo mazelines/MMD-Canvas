@@ -10,6 +10,10 @@
 
 [下载](https://github.com/mazelines/MMD-Canvas/releases) · [CI 结果](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [发布指南（韩语）](releases.md)
 
+## v0.8.3：内置示例 DepthRim 设置调整
+
+内置 Zhuang Fangyi 示例的 23 个材质统一使用 DepthRimLight **宽度 0.81、深度阈值 0.01、过渡宽度 0.04、强度 1.05、白色边缘光**。[0.8.3 更新内容](release-notes/v0.8.3.md)。
+
 ## v0.8.2：更新通知与 DepthRim 修复
 
 应用启动时及运行期间每六小时检查正式版本，通过可关闭的通知提供下载链接。已关闭的版本不会再次提示，网络故障不会打断工作。首次启动还会显示可关闭的 GitHub 点星提示。
