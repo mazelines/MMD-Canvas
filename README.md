@@ -10,6 +10,12 @@ PMX(MMD) 모델을 미리 보고 **FBX / USD로 변환**하는 데스크톱 앱�
 
 [배포 파일 다운로드](https://github.com/mazelines/MMD-Canvas/releases) · [CI 실행 결과](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [릴리스 가이드](docs/releases.md)
 
+## v0.8.2: 업데이트 알림과 DepthRim 수정
+
+시작 시와 실행 중 6시간마다 새 정식 버전을 확인하고, 다운로드 링크가 있는 알림을 표시합니다. 닫은 버전은 다시 알리지 않으며 네트워크 오류는 작업을 방해하지 않습니다. 첫 실행에는 닫을 수 있는 GitHub 별 주기 안내도 표시합니다.
+
+DepthRimLight를 JTRP 원본과 대조해 앞쪽 가림막에 생기던 잘못된 림과 세제곱 폭을 수정했습니다. 태양 방향의 뒤쪽 공간을 검출하며 폭은 화면 해상도에 비례해 선형으로 조절됩니다. 번들 예제 23개 머티리얼의 림 설정도 통일했습니다. [0.8.2 변경 내용](docs/release-notes/v0.8.2.md) · [계산식](docs/shader-stack.md#depthrimlight-깊이-기반-림라이트).
+
 ## v0.8.0: `.shader` 에셋 관리와 저작/지정 분리
 
 셰이더를 **`.shader` 데이터 컨테이너**(메타데이터 + Function Stack 레이어) 파일로 관리합니다. `.canvas`는 셰이더 코드를 임베드하지 않고 **어떤 `.shader`가 어떤 머티리얼에 쓰였는지 상대경로 참조**만 저장합니다. 모델 디렉토리 하위 `shaders/` 폴더에 `.shader`를 두면 모델·텍스처처럼 상대경로로 관리·복원됩니다.

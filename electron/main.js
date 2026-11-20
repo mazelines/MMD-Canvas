@@ -10,6 +10,7 @@ import { Dx12Host } from './dx12.js';
 import { compileShaderStack } from './shader-compiler.js';
 import { libraryStride } from '../src/core/shader-stack.js';
 import { readShaderFile, writeShaderFile, shaderContainer } from '../src/core/shader-file.js';
+import { createUpdateChecker } from './update-checker.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Three.js supplies scene/loader data only; browser 3D rendering is disabled.
@@ -32,7 +33,11 @@ let shaderWin = null;
 const dx12 = new Dx12Host(ROOT, () => win);
 // Independent second host renders the material preview in the shader editor window.
 const previewDx12 = new Dx12Host(ROOT, () => shaderWin);
-app.on('before-quit', () => { dx12.stop(); previewDx12.stop(); });
+const updates = createUpdateChecker({
+  version: app.getVersion(), fetchRelease: (...args) => net.fetch(...args),
+  onUpdate: update => { if (win && !win.isDestroyed()) win.webContents.send('app:update', update); },
+});
+app.on('before-quit', () => { updates.stop(); dx12.stop(); previewDx12.stop(); });
 app.on('child-process-gone', (_event, details) => {
   if (details.type === 'GPU') dx12.logPresentation('gpu-process-exit', { reason: details.reason, exitCode: details.exitCode });
 });
@@ -268,6 +273,7 @@ app.whenReady().then(() => {
     }
   });
   createWindow();
+  if (!isTestRun || process.env.MMDCONV_UPDATE_CHECK === '1') updates.start();
 });
 
 app.on('window-all-closed', () => app.quit());
@@ -277,6 +283,7 @@ const handle = (channel, fn) => ipcMain.handle(channel, async (_e, ...args) => {
   try { return { ok: true, value: await fn(...args) }; }
   catch (e) { return { ok: false, error: e.message || String(e) }; }
 });
+handle('app:update', () => updates.latest);
 // Route DX12 calls to the preview host when they come from the editor window,
 // otherwise to the main host. The editor's Dx12Viewport uses the same api.dx12*.
 const hostFor = (e) => (shaderWin && !shaderWin.isDestroyed() && e.sender === shaderWin.webContents) ? previewDx12 : dx12;
@@ -657,6 +664,11 @@ handle('convert:batch', async (dir, outDir, format, recursive, options) => {
 });
 
 handle('shell:reveal', async (p) => { shell.showItemInFolder(p); });
+handle('shell:openExternal', async (url) => {
+  if (typeof url !== 'string' || !/^https:\/\//i.test(url)) throw new Error('Only https URLs can be opened externally');
+  await shell.openExternal(url);
+  return { ok: true };
+});
 
 // ---------------- screenshot test hook ----------------
 ipcMain.on('viewer:loaded', async (_e, info) => {

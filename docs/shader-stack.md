@@ -96,7 +96,11 @@ void RimLight(inout ShadingContext ctx) {
 
 ### DepthRimLight (깊이 기반 림라이트)
 
-miHoYo 계열 서브컬처 게임의 기법을 참고한 예제입니다. 프레넬(`N·V`) 대신 **광원 방향으로 화면공간 이웃 depth를 샘플링**해 깊이 단절(실루엣)을 검출하고 림을 적용합니다. `offset = lightDirScreen/depth × (3·width)·width²`로 샘플 좌표를 만들고, `Δz = |이웃깊이 − 자기깊이|/자기깊이`를 `saturate((Δz−bias)/fade)`로 마스크화해 색에 더합니다. 배경 depth=0 규약에 맞춰 상대 차분을 쓰며, 광원 쪽 실루엣에 림이 걸립니다. 파라미터: 림 폭·깊이 임계값(bias)·전이 폭(fade)·강도·림 색상. 원신/스타레일/JTRP/MooaToon은 오프셋 방향과 임계값이 서로 다르며, 이 예제는 광원 방향(MooaToon) 방식입니다.
+프레넬(`N·V`) 대신 **태양 방향으로 화면공간 이웃 depth를 샘플링**해 깊이 단절(실루엣)을 검출하는 예제입니다. 폭은 `normalize(lightDirScreen) × 3 × width × viewportHeight/1080` 픽셀이며 선형으로 조절됩니다. 1080p에서 width=1은 3픽셀, width=3은 9픽셀입니다. 카메라 거리·모델 단위에 무관한 화면상 폭을 유지합니다. 광원이 시선과 평행하면 화면 방향이 없어 림도 사라집니다.
+
+깊이 차는 `(이웃깊이 − 자기깊이)/자기깊이`이며 `smoothstep(bias, bias+fade, 깊이차)`로 마스크화합니다. **뒤쪽 공간만 림을 만들고 앞쪽 가림막은 만들지 않습니다.** 배경 depth=0은 열린 공간으로 별도 처리하고, 화면 밖 샘플은 버립니다. bias는 상대 깊이 임계값, fade는 그 뒤 전이 구간입니다.
+
+[JTRP의 GetRimLight](https://github.com/JasonMa0012/JTRP/blob/master/Runtime/Shaders/Character/ToonLighting.hlsl) 및 [GetSSRimLight](https://github.com/JasonMa0012/JTRP/blob/master/UnityChanToonShaderVer2_Project-hdrp-2.2.0-preview1/Runtime/Shaders/JTRPFunction.hlsl)와 대조했습니다. JTRP는 화면 법선 방향으로 이동하며 광원·법선 내적으로 폭을 제한하고, 부호 있는 깊이 차와 smoothstep을 사용합니다. 이 예제는 태양 방향 이동과 해상도 기준 폭을 사용하는 별도 변형으로, JTRP의 거리 램프·마스크 텍스처를 이식한 것은 아닙니다. v0.8.2부터 절댓값 차분과 세제곱 폭을 교체했으며, 기존 사용자 `.shader` 파일은 자동 수정하지 않습니다.
 
 **프리뷰 렌더링 아키텍처**: 프리뷰는 메인 호스트와 **독립된 두 번째 `Dx12Host`**(`previewDx12`, 별도 네이티브 자식 프로세스)가 편집 창에 presenting합니다. `Dx12Host`/네이티브는 per-instance라 단일 인스턴스 가정이 없습니다. main은 `dx12:*` IPC를 **sender 기반**으로 디스패치(편집 창 발신 → previewDx12, 그 외 → dx12)하고, `dx12:presented` ack도 sender로 양 호스트에 라우팅합니다. 셰이더 라이브러리는 **컴파일 1회 → 양 호스트 fan-out**(`loadShaderLibrary`). 편집 창은 `Viewer`/`Dx12Viewport`/`nativeModel`을 재사용해 구체를 렌더링하며, 프리뷰는 MSAA(AA mode 0)로 DLSS feature 생성을 피합니다. 창을 닫으면 `previewDx12.stop()`으로 자식 프로세스를 정리합니다.
 
@@ -127,6 +131,7 @@ miHoYo 계열 서브컬처 게임의 기법을 참고한 예제입니다. 프레
 
 - `npm test`: 파서 단위 테스트(`tests/shader-stack-tests.js`, per-material stride 패킹·`materialId*stride` 주입) + `.shader` 포맷 왕복/allowlist/상대경로 ref(`tests/shader-file-tests.js`) + 워크스페이스 왕복.
 - `npm run test:shader-stack`: 실제 GPU에서 런타임 컴파일→핫스왑→픽셀 변화→프로퍼티 변조→DepthRimLight→기본 복원(비트 동일)→컴파일 오류 생존.
+- `npm run test:depth-rim`: 실제 GPU의 앞·뒤 겹친 평면으로 가림막 제외, 실루엣, 태양 방향 반전, 폭 0, 화면 경계와 512/1024 해상도의 선형 폭을 검증합니다.
 - `npm run test:shader-ui`: 편집기 저작(머티리얼 선택기 없음·아웃라인 토글·선택 셰이더 프리뷰·자동 프로퍼티) + **머티리얼 인스펙터** 할당·per-material 프로퍼티 편집(한 머티리얼 값 변경이 렌더를 바꾸고 다른 머티리얼은 불변)·deep-merge.
 - `npm run test:dx12`/`test:dlss`/`test:presentation`/`test:lifetime`: 베이스 Lambert 분리 + per-material PSO/아웃라인 후 기존 셰이딩·DXR·AA·합성·수명 회귀.
 
