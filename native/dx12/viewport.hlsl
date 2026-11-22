@@ -23,7 +23,7 @@ cbuffer Frame : register(b0) {
     float4 aaInfo;           // output width/height, DLSS active, material mip bias
     float4 aaJitter;         // current/previous sample offsets in render pixels
 };
-cbuffer Draw : register(b1) { uint materialId; uint mipLevel; uint triangleOffset; uint unused1; };
+cbuffer Draw : register(b1) { uint materialId; uint mipLevel; uint triangleOffset; uint selected; };
 StructuredBuffer<Vertex> vertices : register(t0);
 StructuredBuffer<uint4> triangles : register(t1);
 StructuredBuffer<Material> materials : register(t2);
@@ -46,6 +46,7 @@ Texture2D<float4> shadowGuide : register(t145);
 Texture2D<float4> shadowSpatialIntermediate : register(t146);
 Texture2D<float4> aaResult : register(t147);
 Texture2D<float4> composite : register(t148);
+Texture2D<uint> selectionMask : register(t150); // nativeId+1 coverage of the loaded object (0=background)
 RWStructuredBuffer<uint> packedOut : register(u0);
 RWTexture2D<float4> aoOut : register(u1);
 RWTexture2D<float4> output : register(u2);
@@ -75,6 +76,15 @@ Varying vertexMain(uint id : SV_VertexID) {
     o.previousClip=mul(previousProjection,mul(previousView,float4(o.previousWorld,1)));
     float4 p = mul(view, float4(v.position, 1)); o.position = mul(projection, p); o.depth = -p.z;
     o.position.xy+=float2(-2,2)*aaJitter.xy/viewport.xy*o.position.w;return o;
+}
+// Non-jittered vertex for the selection mask: stable sub-pixel coverage across AA
+// phases so the post-AA selection ring does not flicker on a static view.
+Varying maskVertex(uint id : SV_VertexID) {
+    Vertex v = vertices[id]; Varying o; o.world = o.shadowWorld = v.position; o.normal = v.normal; o.uv = v.uv;
+    o.previousWorld = previousVertices[id].position;
+    o.previousClip=mul(previousProjection,mul(previousView,float4(o.previousWorld,1)));
+    float4 p = mul(view, float4(v.position, 1)); o.position = mul(projection, p); o.depth = -p.z;
+    return o;
 }
 Varying outlineVertex(uint id : SV_VertexID) {
     Varying o=vertexMain(id);float4 n=mul(projection,float4(mul((float3x3)view,o.normal),0));
@@ -107,6 +117,23 @@ float3 surfaceNormal(Varying v, bool front, Material m) {
     }return n;
 }
 void cullSide(Material m, bool front) { if ((m.options.z < 0.5 && !front) || (m.options.z > 1.5 && front)) discard; }
+// Selection/ID mask: writes nativeId+1 (0=background) with the same alpha test and
+// sidedness as the surface prepass, so picking matches what is actually on screen.
+uint maskMain(Varying v,bool front:SV_IsFrontFace):SV_Target {
+    Material m=materials[materialId];
+    cullSide(m,front);
+    // Match the color pass visibility (max(alphaTest,0.001)), not the prepass 0.5
+    // representative-surface cutoff, so visible translucent surfaces are pickable.
+    clip(surfaceAlpha(m,surfaceUv(m,v.uv))-max(m.options.x,0.001));
+    return materialId+1;
+}
+// Depth-only variant for the mask depth pass: same alpha clip so alpha holes do not
+// write depth (rear surfaces remain pickable through them). No color output.
+void maskDepthMain(Varying v,bool front:SV_IsFrontFace) {
+    Material m=materials[materialId];
+    cullSide(m,front);
+    clip(surfaceAlpha(m,surfaceUv(m,v.uv))-max(m.options.x,0.001));
+}
 struct PrepassOutput { float4 normal : SV_Target0; float4 surface : SV_Target1; float4 motion : SV_Target2; };
 PrepassOutput normalMain(Varying v, bool front : SV_IsFrontFace, uint primitive : SV_PrimitiveID) {
     Material m = materials[materialId]; cullSide(m, front); float a = surfaceAlpha(m, surfaceUv(m, v.uv));
@@ -386,6 +413,27 @@ void cortao_writeResult(int2 p, float visibility, float3 bentNormal, float3x3 ba
     }
     rgb = lerp(bg, rgb, hdr.a);
     float4 result = float4(encodeSRGB(saturate(rgb)), 1);
+    // Object selection outline (Blender/Unreal style): a uniform outer-silhouette
+    // ring in display space, drawn AFTER temporal reconstruction so the UI highlight
+    // never mixes into AA history. Outer-only: background pixels adjacent to the
+    // selection mask. sharpening.y carries the object-selected flag.
+    if (sharpening.y != 0) {
+        // Center and neighbors use the SAME output->mask coordinate map (fractional
+        // phase preserved) so the ring is symmetric and width-stable across AA modes.
+        float2 outc=float2(tid.xy)+0.5;
+        float2 rsc=viewport.xy/aaInfo.xy;
+        // round() keeps the fractional phase symmetric for +/- offsets.
+        int2 sp=clamp(int2(outc*rsc+0.5),0,int2(viewport.xy)-1);
+        if (selectionMask[sp]==0) {
+            const int R=2; uint ring=0;
+            [unroll] for(int dy=-R;dy<=R;dy++) [unroll] for(int dx=-R;dx<=R;dx++) {
+                if(dx*dx+dy*dy>R*R) continue;
+                int2 q=clamp(int2((outc+float2(dx,dy))*rsc+0.5),0,int2(viewport.xy)-1);
+                ring |= (selectionMask[q]!=0)?1u:0u;
+            }
+            if(ring!=0) result.rgb=lerp(result.rgb,float3(1.0,0.604,0.239),0.9);
+        }
+    }
     // Sharpening reads finished neighbors, so the composite lands in an
     // intermediate surface first; sharpenMain then writes the shared output.
     if (sharpening.x > 0) compositeOut[tid.xy] = result; else output[tid.xy] = result;

@@ -55,6 +55,10 @@ export class Viewer {
     this.scene.add(this.root);
     this.current = null;        // { object, kind, pmx?, sceneData?, materials?, animation? }
     this.onAnimationFrame = null; // (state) => void, after playback or a seek moved the pose
+    this.onPick = null;         // (panelMaterialIndex, hitObject) => void, viewport click selection
+    this._gizmoDragging = false;
+    this._pickStart = null;
+    this._pickGen = 0;          // selection request generation (stale-response guard)
     this.renderMode = 'lambert';
     this.outlineSettings = { width: 1.6, color: '#151923' };
     this.skeleton = null;
@@ -80,7 +84,33 @@ export class Viewer {
     this.lightControls.attach(this.lightRig);
     this.lightGizmo = this.lightControls.getHelper();
     this.scene.add(this.lightGizmo);
-    this.lightControls.addEventListener('dragging-changed', (ev) => { this.controls.enabled = !ev.value; });
+    this.lightControls.addEventListener('dragging-changed', (ev) => {
+      this.controls.enabled = !ev.value; this._gizmoDragging = ev.value;
+      // Latch the gesture as gizmo-used even if dragging is cleared before pointerup.
+      if (ev.value && this._pickStart) this._pickStart.gizmo = true;
+    });
+    // Unreal-style viewport picking: a clean left click (no camera/gizmo drag) reads
+    // the GPU selection mask. The gesture is latched at pointerdown so a gizmo release
+    // that clears `dragging` before pointerup cannot leak into a pick, and a long drag
+    // returning to its start point is not treated as a click.
+    this.canvas.addEventListener('pointerdown', (ev) => {
+      if (ev.button !== 0) return;
+      this._pickStart = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, maxMove: 0,
+        gizmo: this.lightControls.dragging || this.lightControls.axis != null };
+    });
+    this.canvas.addEventListener('pointermove', (ev) => {
+      const s = this._pickStart; if (!s || ev.pointerId !== s.id) return;
+      s.maxMove = Math.max(s.maxMove, Math.hypot(ev.clientX - s.x, ev.clientY - s.y));
+      if (this.lightControls.dragging) s.gizmo = true;
+    });
+    this.canvas.addEventListener('pointerup', (ev) => {
+      const s = this._pickStart; this._pickStart = null;
+      if (!s || ev.pointerId !== s.id || ev.button !== 0) return;
+      if (s.gizmo || s.maxMove > 5) return;
+      this.pickAt(ev.clientX, ev.clientY);
+    });
+    this.canvas.addEventListener('pointercancel', () => { this._pickStart = null; });
+    this.canvas.addEventListener('lostpointercapture', () => { this._pickStart = null; });
     this.lightControls.addEventListener('change', () => this.requestRender());
     this.lightControls.addEventListener('objectChange', () => this.syncLightFromRig(true));
     this.onLightDirection = null;
@@ -105,6 +135,24 @@ export class Viewer {
   }
 
   requestRender() { this.needsRender = true; }
+  // GPU picking: read the selection mask (nativeId+1 coverage, alpha/visibility-correct)
+  // at the click point. Reports (panelMaterialIndex, hitObject). The mask is produced by
+  // the same native pass that draws the screen, so alpha holes / hidden nodes / occlusion
+  // match exactly, and nativeId->panelIndices gives the global panel index for any format.
+  async pickAt(clientX, clientY) {
+    if (!this.current?.object || !this.onPick || !this.dx12) return;
+    const gen = ++this._pickGen, model = this.loadToken;
+    let r;
+    try { r = await this.dx12.pick(clientX, clientY); } catch { return; } // renderer stopped/failed
+    // null = stale/invalid response (mapping rebuilt mid-flight): do NOT call onPick
+    // (must not be mistaken for an empty-space click that deselects).
+    if (!r) return;
+    // Only the latest user intent applies: a newer pick, Esc/clear/reload, or a model
+    // swap supersedes this in-flight response.
+    if (gen !== this._pickGen || model !== this.loadToken || !this.current?.object) return;
+    this.onPick(r.panelIndex, r.hit);
+  }
+  invalidatePick() { this._pickGen++; }
 
   setCortao(settings) {
     this.cortao.configure(settings);
@@ -288,6 +336,7 @@ export class Viewer {
   }
 
   clear() {
+    this.invalidatePick();
     if (this.skeleton) { this.scene.remove(this.skeleton); disposeObject(this.skeleton); this.skeleton = null; }
     if (this.current) { this.current.animation?.dispose(); this.current.shading?.dispose(); this.root.remove(this.current.object); disposeObject(this.current.object); this.current = null; }
     this.cortao.clear();
@@ -299,6 +348,7 @@ export class Viewer {
   /** @returns {Promise<object>} info about the loaded model */
   async load(filePath) {
     const token = ++this.loadToken;
+    this.invalidatePick();
     const ext = extname(filePath);
     let loaded;
     if (ext === '.pmx') loaded = await this.loadPmx(filePath);

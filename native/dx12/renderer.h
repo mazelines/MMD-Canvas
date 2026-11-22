@@ -26,16 +26,18 @@ struct NativeRenderer {
     ComPtr<ID3D12DescriptorHeap> descriptors, rtvs, dsvs;
     ComPtr<ID3D12PipelineState> normalPso, colorPso, transparentPso, outlinePso, wirePso, packPso, mipPso, aoPso, outputPso, sharpenPso;
     ComPtr<ID3D12PipelineState> shadowTracePso, shadowTemporalPso, shadowSpatialPso, shadowFinalPso;
-    ComPtr<ID3D12PipelineState> aaColorPso, aaTransparentPso, aaOutlinePso, aaPreparePso;
+    ComPtr<ID3D12PipelineState> aaColorPso, aaTransparentPso, aaOutlinePso, aaPreparePso, maskPso, maskDepthPso;
     // Per-material shader stacks: a stackId -> PSO-set library plus a per-material
     // stackId assignment. stackId 0 uses the base (global) color PSOs above.
     struct PsoSet { ComPtr<ID3D12PipelineState> color, transparent, wire, aaColor, aaTransparent; };
     std::unordered_map<uint32_t, PsoSet> stackPsos;
     std::unordered_map<uint32_t, bool> stackOutline;
     std::vector<uint32_t> materialStackIds;
-    ComPtr<ID3D12Resource> aaOutput, aaMotion, aaDepth, aaExposure, composite, nisConfig, userParams;
+    ComPtr<ID3D12Resource> aaOutput, aaMotion, aaDepth, aaExposure, composite, nisConfig, userParams, selectionMask, pickReadback;
     ComPtr<ID3D12Resource> vertexBuffer, triangleBuffer, materialBuffer, indexBuffer, blas, tlas, scratch, instances, constants;
-    ComPtr<ID3D12Resource> normal, depth, hdr, hdrMs, depthMs, packedBuffer, aoTexture, sharedOutput, lut;
+    ComPtr<ID3D12Resource> normal, depth, hdr, hdrMs, depthMs, maskDepth, packedBuffer, aoTexture, sharedOutput, lut;
+    uint32_t modelGen = 0;      // increments per loadModel; binds mask/pick to a model upload
+    bool maskValid = false;     // mask belongs to the current model only after a rendered frame
     ComPtr<ID3D12Resource> previousVertexBuffer, motion, shadowRawTexture, shadowGuideTexture;
     std::array<ComPtr<ID3D12Resource>,2> surfaces, shadowHistories, shadowFilters;
     std::array<float,76> previousFrame{};
@@ -51,6 +53,8 @@ struct NativeRenderer {
     struct SharedFrame { ComPtr<ID3D12Resource> texture; HANDLE handle=nullptr; uint32_t w=0,h=0,id=0; bool busy=false; };
     std::vector<SharedFrame> sharedFrames;
     uint32_t vertexCount = 0, width = 0, height = 0, descriptorSize = 0, rtvSize = 0;
+    // CPU-only heap: ClearUnorderedAccessViewUint requires a non-shader-visible CPU handle.
+    ComPtr<ID3D12DescriptorHeap> clearHeap; D3D12_CPU_DESCRIPTOR_HANDLE clearUavCpu{};
     std::array<uint32_t, 32> mipInfo{};
     bool hasModel = false;
     bool outlines = false;
@@ -59,15 +63,18 @@ struct NativeRenderer {
     explicit NativeRenderer(Device& device, const std::filesystem::path& dir, DWORD parentPid) : d(device), directory(dir), dlss(device,dir) {
         parent = OpenProcess(PROCESS_DUP_HANDLE, FALSE, parentPid);
         if (!parent) throw std::runtime_error("Cannot share textures with the host process");
-        D3D12_DESCRIPTOR_HEAP_DESC h{}; h.NumDescriptors = 174; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV; h.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        D3D12_DESCRIPTOR_HEAP_DESC h{}; h.NumDescriptors = 175; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV; h.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
         check(d.device->CreateDescriptorHeap(&h, IID_PPV_ARGS(&descriptors)), "Create descriptors");
         descriptorSize = d.device->GetDescriptorHandleIncrementSize(h.Type);
-        h = {}; h.NumDescriptors = 7; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+        h = {}; h.NumDescriptors = 8; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
         check(d.device->CreateDescriptorHeap(&h, IID_PPV_ARGS(&rtvs)), "Create render target views"); rtvSize = d.device->GetDescriptorHandleIncrementSize(h.Type);
-        h.NumDescriptors = 2; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+        h.NumDescriptors = 3; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
         check(d.device->CreateDescriptorHeap(&h, IID_PPV_ARGS(&dsvs)), "Create depth view");
+        h = {}; h.NumDescriptors = 1; h.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV; h.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+        check(d.device->CreateDescriptorHeap(&h, IID_PPV_ARGS(&clearHeap)), "Create clear heap");
+        clearUavCpu = clearHeap->GetCPUDescriptorHandleForHeapStart();
         D3D12_DESCRIPTOR_RANGE ranges[2]{};
-        ranges[0] = {D3D12_DESCRIPTOR_RANGE_TYPE_SRV,150,0,0,0}; ranges[1] = {D3D12_DESCRIPTOR_RANGE_TYPE_UAV,14,0,0,0};
+        ranges[0] = {D3D12_DESCRIPTOR_RANGE_TYPE_SRV,151,0,0,0}; ranges[1] = {D3D12_DESCRIPTOR_RANGE_TYPE_UAV,15,0,0,0};
         D3D12_ROOT_PARAMETER params[4]{};
         params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV; params[0].Descriptor.ShaderRegister = 0;
         params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS; params[1].Constants = {1,0,4};
@@ -99,6 +106,14 @@ struct NativeRenderer {
         nisConfig=buffer(sizeof(NISConfig),D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
         normalPso = graphics("normalMain", false, true); colorPso = graphics("colorMain", true, true); transparentPso = graphics("colorMain", true, false);
         outlinePso = graphics("outlineMain", true, false, "outlineVertex");
+        maskPso = graphics("maskMain", false, false, "maskVertex");
+        { // depth-only non-jittered mask depth pass (stable occlusion for the mask)
+            auto vs=shader("maskVertex"),ps=shader("maskDepthMain"); D3D12_GRAPHICS_PIPELINE_STATE_DESC p{}; p.pRootSignature=root.Get(); p.VS={vs.data(),vs.size()}; p.PS={ps.data(),ps.size()};
+            p.RasterizerState.FillMode=D3D12_FILL_MODE_SOLID; p.RasterizerState.CullMode=D3D12_CULL_MODE_NONE; p.RasterizerState.FrontCounterClockwise=TRUE; p.RasterizerState.DepthClipEnable=TRUE;
+            p.DepthStencilState.DepthEnable=TRUE; p.DepthStencilState.DepthWriteMask=D3D12_DEPTH_WRITE_MASK_ALL; p.DepthStencilState.DepthFunc=D3D12_COMPARISON_FUNC_LESS_EQUAL;
+            p.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE; p.NumRenderTargets=0; p.DSVFormat=DXGI_FORMAT_D32_FLOAT; p.SampleDesc.Count=1; p.SampleMask=UINT_MAX;
+            check(d.device->CreateGraphicsPipelineState(&p,IID_PPV_ARGS(&maskDepthPso)),"maskDepth");
+        }
         wirePso = graphics("colorMain", true, true, "vertexMain", true);
         aaColorPso=graphics("aaColorMain",true,true);aaTransparentPso=graphics("aaColorMain",true,false);aaOutlinePso=graphics("aaOutlineMain",true,false,"outlineVertex");
         aaPreparePso=compute("aaPrepareMain");
@@ -192,6 +207,9 @@ struct NativeRenderer {
             p.SampleDesc.Count=1;p.NumRenderTargets=3;p.RTVFormats[1]=DXGI_FORMAT_R16G16_FLOAT;p.RTVFormats[2]=DXGI_FORMAT_R32_FLOAT;
             p.BlendState.IndependentBlendEnable=TRUE;
             for(int i=1;i<3;i++){p.BlendState.RenderTarget[i]=b;p.BlendState.RenderTarget[i].BlendEnable=FALSE;}
+        }
+        if(std::strcmp(pixel,"maskMain")==0) {
+            p.SampleDesc.Count=1;p.NumRenderTargets=1;p.RTVFormats[0]=DXGI_FORMAT_R32_UINT;
         }
         ComPtr<ID3D12PipelineState> result; check(d.device->CreateGraphicsPipelineState(&p,IID_PPV_ARGS(&result)),pixel); return result;
     }
@@ -295,6 +313,7 @@ struct NativeRenderer {
             }
             transition(tex.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_GENERIC_READ);textureView(tex.Get(),8+i);images.push_back(tex); }
         buildAcceleration(); d.submit(); uploads.clear(); hasModel=true;
+        ++modelGen; maskValid=false; // previous selection mask no longer belongs to this model
         previousVertexBuffer=vertexBuffer;historyValid=false;stableFrames=0;poseChanged=false;aaHistoryValid=false;aaStableFrames=0;
         materialStackIds.clear(); // stale per-material assignments; JS resends after load
     }
@@ -352,6 +371,15 @@ struct NativeRenderer {
         textureView(aaOutput.Get(),147);
         textureView(aaMotion.Get(),170,true);textureView(aaDepth.Get(),171,true);textureView(aaExposure.Get(),172,true);
         d.device->CreateRenderTargetView(aaMotion.Get(),nullptr,rtv(5));d.device->CreateRenderTargetView(aaDepth.Get(),nullptr,rtv(6));
+        // Selection/ID mask (nativeId+1 coverage). R32_UINT: cleared via UAV uint clear,
+        // read as t150 in outputMain for the screen-space outline, copied for picking.
+        maskDepth=texture(w,h,DXGI_FORMAT_D32_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,D3D12_RESOURCE_STATE_DEPTH_WRITE);
+        { auto mz=dsvs->GetCPUDescriptorHandleForHeapStart(); mz.ptr+=size_t(2)*d.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV); d.device->CreateDepthStencilView(maskDepth.Get(),nullptr,mz); }
+        selectionMask=texture(w,h,DXGI_FORMAT_R32_UINT,rw|D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_GENERIC_READ);
+        textureView(selectionMask.Get(),150);textureView(selectionMask.Get(),174,true);
+        { D3D12_UNORDERED_ACCESS_VIEW_DESC v{}; v.ViewDimension=D3D12_UAV_DIMENSION_TEXTURE2D; v.Format=DXGI_FORMAT_R32_UINT; d.device->CreateUnorderedAccessView(selectionMask.Get(),nullptr,&v,clearUavCpu); }
+        d.device->CreateRenderTargetView(selectionMask.Get(),nullptr,rtv(7));
+        pickReadback=buffer(256,D3D12_HEAP_TYPE_READBACK,D3D12_RESOURCE_STATE_COPY_DEST);
         historyValid=false;stableFrames=0;aaHistoryValid=false;aaStableFrames=0;
         uint32_t total=0; for(uint32_t i=0;i<8;i++) { uint32_t mw=std::max(1u,w>>i),mh=std::max(1u,h>>i); mipInfo[i*4]=mw;mipInfo[i*4+1]=mh;mipInfo[i*4+2]=total;total+=mw*mh; }
         packedBuffer=buffer(size_t(total)*4,D3D12_HEAP_TYPE_DEFAULT,D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
@@ -396,6 +424,52 @@ struct NativeRenderer {
             start=end;
         }
         if(!normals&&outlines){d.list->SetPipelineState(colorSamples==1?aaOutlinePso.Get():outlinePso.Get());for(size_t start=0;start<triangles.size();){size_t end=start+1;uint32_t mat=triangles[start].material;while(end<triangles.size()&&triangles[end].material==mat)end++;uint32_t sid=mat<materialStackIds.size()?materialStackIds[mat]:0;auto ot=stackOutline.find(sid);if(ot!=stackOutline.end()&&ot->second){uint32_t values[4]{mat,0,0,0};d.list->SetGraphicsRoot32BitConstants(1,4,values,0);d.list->DrawIndexedInstanced(UINT((end-start)*3),1,UINT(start*3),0,0);}start=end;}}
+    }
+    // Selection/ID mask: a dedicated NON-jittered depth pass (maskDepth) then a mask
+    // color pass depth-tested against it. Non-jittered coverage keeps the post-AA ring
+    // stable across AA phases; own depth gives correct occlusion incl. translucent order.
+    void maskDraw() {
+        bindings(true); D3D12_VIEWPORT vp{0,0,float(width),float(height),0,1};D3D12_RECT rect{0,0,LONG(width),LONG(height)};d.list->RSSetViewports(1,&vp);d.list->RSSetScissorRects(1,&rect);
+        auto mz=dsvs->GetCPUDescriptorHandleForHeapStart();mz.ptr+=size_t(2)*d.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+        // Visit each material run once; `transparent` selects which runs to emit.
+        const auto runs=[&](int transparent){ for(size_t start=0;start<triangles.size();) {
+            size_t end=start+1;uint32_t mat=triangles[start].material;while(end<triangles.size()&&triangles[end].material==mat)end++;
+            if(transparent<0||int(materials[mat].options[1]>0)==transparent){uint32_t values[4]{mat,0,UINT(start),0};d.list->SetGraphicsRoot32BitConstants(1,4,values,0);d.list->DrawIndexedInstanced(UINT((end-start)*3),1,UINT(start*3),0,0);}
+            start=end;
+        } };
+        // Pass A: non-jittered depth, every run once (nearest depth wins regardless of order).
+        d.list->ClearDepthStencilView(mz,D3D12_CLEAR_FLAG_DEPTH,1,0,0,nullptr);
+        d.list->OMSetRenderTargets(0,nullptr,FALSE,&mz);
+        d.list->SetPipelineState(maskDepthPso.Get());
+        runs(-1);
+        // Pass B: mask color (nativeId+1) depth-tested against maskDepth, no depth write.
+        // Opaque then transparent, each run once (transparent front overwrites where it passes).
+        transition(selectionMask.Get(),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        const UINT zeros[4]{0,0,0,0};d.list->ClearUnorderedAccessViewUint(gpu(174),clearUavCpu,selectionMask.Get(),zeros,0,nullptr);
+        transition(selectionMask.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_RENDER_TARGET);
+        auto target=rtv(7);
+        d.list->OMSetRenderTargets(1,&target,FALSE,&mz);
+        d.list->SetPipelineState(maskPso.Get());
+        runs(0); runs(1);
+        transition(selectionMask.Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_GENERIC_READ);
+    }
+    // Read back the selection mask at a render-res pixel for GPU picking (0=empty).
+    uint32_t pickMask(uint32_t x,uint32_t y) {
+        if(!hasModel||!selectionMask||!maskValid)return 0; // no valid mask for the current model yet
+        x=std::min(x,width-1);y=std::min(y,height-1);
+        d.begin(); // the render pass left the command list closed
+        transition(pickReadback.Get(),D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_COPY_DEST);
+        transition(selectionMask.Get(),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_COPY_SOURCE);
+        D3D12_TEXTURE_COPY_LOCATION from{},to{};from.pResource=selectionMask.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;from.SubresourceIndex=0;
+        auto desc=selectionMask->GetDesc();desc.Width=1;desc.Height=1; // 1x1 dest footprint fits the readback buffer
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp{};UINT64 bytes=0;d.device->GetCopyableFootprints(&desc,0,1,0,&fp,nullptr,nullptr,&bytes);
+        to.pResource=pickReadback.Get();to.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;to.PlacedFootprint=fp;
+        D3D12_BOX box{x,y,0,x+1,y+1,1};d.list->CopyTextureRegion(&to,0,0,0,&from,&box);
+        transition(selectionMask.Get(),D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_GENERIC_READ);
+        d.submit();
+        void* mapped=nullptr;check(pickReadback->Map(0,nullptr,&mapped),"Map pick readback");
+        uint32_t value=*(uint32_t*)((uint8_t*)mapped+fp.Offset);pickReadback->Unmap(0,nullptr);
+        return value;
     }
     void denoiseShadows() {
         bindings(false);
@@ -478,6 +552,8 @@ struct NativeRenderer {
         } else {
             transition(hdrMs.Get(),D3D12_RESOURCE_STATE_RESOLVE_SOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET);draw(false);transition(hdrMs.Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_RESOLVE_SOURCE);transition(hdr.Get(),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_RESOLVE_DEST);d.list->ResolveSubresource(hdr.Get(),0,hdrMs.Get(),0,DXGI_FORMAT_R16G16B16A16_FLOAT);transition(hdr.Get(),D3D12_RESOURCE_STATE_RESOLVE_DEST,D3D12_RESOURCE_STATE_GENERIC_READ);
         }
+        maskDraw(); // selection/ID coverage for picking + the post-AA outline
+        maskValid=true;
         bindings(false);
         // NVSharpen reads the finished sRGB composite, so outputMain targets an
         // intermediate surface and the NIS pass writes the shared output. AO debug
@@ -508,6 +584,6 @@ struct NativeRenderer {
         if(temporal)stableFrames=std::min(stableFrames+1,32u);
         if(aaActive)aaStableFrames=std::min(aaStableFrames+1,32u);
         const char* aaName=dlss.mode==1?"DLAA":dlss.mode==2?"DLSS Quality":dlss.mode==3?"DLSS Balanced":"MSAA 4x";
-        double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();std::ostringstream s;s<<"{\"type\":\"frame\",\"id\":"<<id<<",\"handle\":\""<<uint64_t(remoteHandle)<<"\",\"width\":"<<ow<<",\"height\":"<<oh<<",\"renderWidth\":"<<width<<",\"renderHeight\":"<<height<<",\"antialiasing\":\""<<aaName<<"\",\"sharpen\":"<<uint32_t(std::lround(frame[72]*100))<<",\"aaReset\":"<<(aaReset?"true":"false")<<",\"renderMs\":"<<ms<<",\"aaAccumulating\":"<<(aaActive&&aaStableFrames<32?"true":"false")<<",\"shadowAccumulating\":"<<(temporal&&frame[46]>0&&stableFrames<32?"true":"false")<<'}';return s.str();
+        double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();std::ostringstream s;s<<"{\"type\":\"frame\",\"id\":"<<id<<",\"handle\":\""<<uint64_t(remoteHandle)<<"\",\"width\":"<<ow<<",\"height\":"<<oh<<",\"renderWidth\":"<<width<<",\"renderHeight\":"<<height<<",\"antialiasing\":\""<<aaName<<"\",\"sharpen\":"<<uint32_t(std::lround(frame[72]*100))<<",\"aaReset\":"<<(aaReset?"true":"false")<<",\"renderMs\":"<<ms<<",\"aaAccumulating\":"<<(aaActive&&aaStableFrames<32?"true":"false")<<",\"shadowAccumulating\":"<<(temporal&&frame[46]>0&&stableFrames<32?"true":"false")<<",\"modelGen\":"<<modelGen<<'}';return s.str();
     }
 };

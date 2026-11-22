@@ -40,7 +40,7 @@ module.exports = async ({ appOutDir, packager }) => {
   const resources = packager.getResourcesDir(appOutDir);
   verifyPackage(path.join(resources, 'app.asar'), packager.projectDir);
   verifyExample(path.join(packager.projectDir, 'Example'), path.join(resources, '..', 'Example'));
-  for (const file of ['mmd-dx12.exe', 'nvngx_dlss.dll', 'aaColorMain.cso', 'aaOutlineMain.cso', 'aaPrepareMain.cso', 'vertexMain.cso', 'outlineVertex.cso', 'outlineMain.cso', 'normalMain.cso', 'colorMain.cso', 'packMain.cso', 'mipMain.cso', 'cortaoMain.cso', 'outputMain.cso', 'shadowTraceMain.cso', 'shadowTemporalMain.cso', 'shadowSpatialMain.cso', 'shadowSpatialFinalMain.cso', 'nis-sharpen.cso', 'dxc.exe', 'dxcompiler.dll', 'dxil.dll', '32x32x24x32_R32_UINT.bin']) {
+  for (const file of ['mmd-dx12.exe', 'nvngx_dlss.dll', 'aaColorMain.cso', 'aaOutlineMain.cso', 'aaPrepareMain.cso', 'vertexMain.cso', 'outlineVertex.cso', 'outlineMain.cso', 'maskVertex.cso', 'maskMain.cso', 'maskDepthMain.cso', 'normalMain.cso', 'colorMain.cso', 'packMain.cso', 'mipMain.cso', 'cortaoMain.cso', 'outputMain.cso', 'shadowTraceMain.cso', 'shadowTemporalMain.cso', 'shadowSpatialMain.cso', 'shadowSpatialFinalMain.cso', 'nis-sharpen.cso', 'dxc.exe', 'dxcompiler.dll', 'dxil.dll', '32x32x24x32_R32_UINT.bin']) {
     const packaged=path.join(resources,'..','native','dx12',file);
     assert.ok(fs.existsSync(packaged),`Packaged DX12 runtime missing: ${file}`);
     assert.ok(fs.readFileSync(packaged).equals(fs.readFileSync(path.join(packager.projectDir,'out','dx12',file))),`Packaged DX12 runtime differs: ${file}`);

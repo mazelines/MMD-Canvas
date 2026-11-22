@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('api', {
   dx12Shader: (layers) => call('dx12:shader', layers),
   dx12Params: (data) => call('dx12:params', data),
   dx12MaterialStacks: (stackIds) => call('dx12:matstacks', stackIds),
+  dx12Pick: (x, y) => call('dx12:pick', x, y),
   shaderStackLibraryGet: () => call('shader-stack:library-get'),
   shaderStackLibrarySet: (library) => call('shader-stack:library-set', library),
   shaderStackRestore: (payload) => call('shader-stack:restore', payload),

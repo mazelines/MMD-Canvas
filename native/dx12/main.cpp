@@ -119,6 +119,7 @@ int main(int argc, char** argv) {
                     catch(const std::exception&e){std::cout<<"{\"type\":\"shaderlib\",\"ok\":false,\"error\":"<<::quoted(e.what())<<"}"<<std::endl;}
                 }
                 else if(header[0]==9){renderer.setMaterialStacks(payload);std::cout<<"{\"type\":\"matstacks\",\"ok\":true}"<<std::endl;}
+                else if(header[0]==10){Reader r{payload};uint32_t x=r.u32(),y=r.u32();uint32_t id=renderer.pickMask(x,y);std::cout<<"{\"type\":\"pick\",\"id\":"<<id<<",\"gen\":"<<renderer.modelGen<<"}"<<std::endl;}
                 else if(header[0]==4)break;
                 else if(header[0]!=3)throw std::runtime_error("Unknown native command");
             }

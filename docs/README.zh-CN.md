@@ -10,6 +10,14 @@
 
 [下载](https://github.com/mazelines/MMD-Canvas/releases) · [CI 结果](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [发布指南（韩语）](releases.md)
 
+## v0.9.0：视口对象选择与屏幕空间选择轮廓
+
+像 Unreal/Blender 编辑器一样，在视口中**点击即可选中已加载的对象**，并以屏幕空间计算的浅橙色**外侧剪影环**显示。与卡通描边分离，在平面和开放表面上也能显示，不受 AA 相位影响、保持稳定，选择/取消选择时无残影。点击的材质会单独同步为材质检查器的编辑对象。
+
+- **GPU 掩码拾取**：通过原生选择/ID 掩码回读进行拾取，使纹理 alpha、alphaTest、层级可见性与画面一致（正确处理 alpha 孔洞后面的面、隐藏节点与半透明）。通过模型/映射世代匹配，使延迟响应与模型更换竞态失效。
+- **手势区分**：相机拖动、操纵器操作、折返拖动和 pointercancel 不会被视为选择。点击空白处或按 Esc 取消选择。
+- MSAA/DLAA/DLSS 全部模式下环宽保持一致（左右对称），静止画面不闪烁。[结构](native-dx12.md) · [0.9.0 发布说明](release-notes/v0.9.0.md)。
+
 ## v0.8.3：内置示例 DepthRim 设置调整
 
 内置 Zhuang Fangyi 示例的 23 个材质统一使用 DepthRimLight **宽度 0.81、深度阈值 0.01、过渡宽度 0.04、强度 1.05、白色边缘光**。[0.8.3 更新内容](release-notes/v0.8.3.md)。
