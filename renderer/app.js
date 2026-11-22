@@ -39,6 +39,15 @@ const applySharpen=(value,save=true)=>{
 $('viewport-sharpen').addEventListener('input',()=>applySharpen($('viewport-sharpen').value));
 applySharpen(viewer.dx12.sharpen,false);
 const materialPanel = new MaterialPanel(viewer);
+// Unreal-style viewport selection: clicking the object selects the WHOLE loaded object
+// (light-orange screen-space outline) and sets the inspector edit target to the clicked
+// material. Empty-space click / Esc clears the object selection. Inspector row selection
+// is the edit target only and does not drive the object outline (separate states).
+viewer.onPick = (panelIndex, hit) => {
+  if (hit) { viewer.dx12.setObjectSelected(true); if (panelIndex >= 0) materialPanel.select(panelIndex, false, false); }
+  else viewer.dx12.setObjectSelected(false);
+};
+window.__materialPanel = materialPanel; // test hook: inspector edit-target state
 // Shader stack editing lives in a separate window; main owns the stack state and
 // serializes shader loads against renders via the host channel mutex. On apply,
 // re-render the main viewport (the shader swap resets temporal history so DLAA
@@ -346,6 +355,7 @@ async function openModel(filePath, fromWorkspace = false) {
 }
 
 function renderInfo(info, filePath) {
+  viewer.dx12.setObjectSelected(false); // a newly loaded model starts with no selection
   const rows = [
     [t('이름'), info.name || basename(filePath)],
     info.nameEn ? [t('영문 이름'), info.nameEn] : null,
@@ -589,6 +599,7 @@ window.addEventListener('keydown', (ev) => {
   else if (plain && ev.code === 'KeyW' && $('flag-light-gizmo').checked) viewer.setLightGizmoMode('translate');
   else if (plain && ev.code === 'KeyE' && $('flag-light-gizmo').checked) viewer.setLightGizmoMode('rotate');
   else if (plain && ev.code === 'KeyX' && $('flag-light-gizmo').checked) $('btn-light-space').click();
+  else if (ev.code === 'Escape' && !document.querySelector('dialog[open]')) { viewer.invalidatePick(); viewer.dx12.setObjectSelected(false); }
 });
 
 // drag & drop
@@ -781,7 +792,7 @@ async function openWorkspace(filePath = null, { remember = true } = {}) {
     const { data } = result;
     if (data.model && !await openModel(data.model.path, true)) return;
     if (!data.model) {
-      viewer.clear(); state.loadedPath = null; state.loadedInfo = null;
+      viewer.clear(); viewer.dx12.setObjectSelected(false); state.loadedPath = null; state.loadedInfo = null;
       $('info').replaceChildren(el('div', { className: 'muted', textContent: t('열린 모델이 없습니다.') }));
       $('panel-warnings').hidden = true; $('panel-morphs').hidden = true;
       $('morphs').replaceChildren(); $('btn-convert').disabled = true;

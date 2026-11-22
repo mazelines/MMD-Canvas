@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { gt7InverseDisplay } from './gt7-tonemapping.js';
 import { nativeTexture } from './native-textures.js';
+import { collectMaterials } from './material-info.js';
 import { packMaterialParams } from '../src/core/shader-stack.js';
 
 function bytes(array) { return new Uint8Array(array.buffer, array.byteOffset, array.byteLength); }
@@ -22,6 +23,9 @@ export function nativeModel(object, poseOnly = false, materialAssign = null, sta
     if (textures.length >= 128) throw new Error('DX12 뷰포트는 현재 텍스처 128개까지 지원합니다.');
     const id = textures.length; image.srgb=texture.colorSpace===THREE.SRGBColorSpace; textures.push(image); textureIds.set(texture, id); return id;
   };
+  // Global panel index by material identity (same order as collectMaterials), so
+  // multi-mesh scenes map nativeId->panel index correctly (local group slots differ).
+  const panelOf = new Map(collectMaterials(object).map((e, i) => [e.material, i]));
   const materialId = (m, panelIndex = 0) => {
     if (materialIds.has(m)) return materialIds.get(m);
     if(m.displacementMap || (m.normalMap && m.normalMapType===THREE.ObjectSpaceNormalMap)) throw new Error('DX12에서 아직 지원하지 않는 재질입니다: 변위·Object-space Normal.');
@@ -80,7 +84,7 @@ export function nativeModel(object, poseOnly = false, materialAssign = null, sta
     for (const group of groups) {
       const m = mats[group.materialIndex]; if (!m || !m.visible || m.opacity <= 0) continue;
       if(m.isShaderMaterial)throw new Error('사용자 GLSL 셰이더는 DX12에서 지원하지 않습니다.');
-      const mat = materialId(m, group.materialIndex), start = Math.max(group.start, geometry.drawRange.start);
+      const mat = materialId(m, panelOf.get(m) ?? group.materialIndex), start = Math.max(group.start, geometry.drawRange.start);
       const end = Math.min(group.start + group.count, geometry.drawRange.start + geometry.drawRange.count, geometry.index?.count ?? position.count);
       for (let i = start; i + 2 < end; i += 3) triangles.push(base + (geometry.index?.getX(i) ?? i), base + (geometry.index?.getX(i+1) ?? i+1), base + (geometry.index?.getX(i+2) ?? i+2), mat);
     }
@@ -105,6 +109,10 @@ export class Dx12Viewport {
     this.materialAssign = []; // panel material index -> shader stackId (synced from main)
     this.library = []; this.instances = []; this.stride = 1; // per-material shader state (synced from main)
     this.panelIndices = []; this.loadedParamKey = '';
+    this.objectSelected = false; // whole loaded object selected (viewport outline)
+    // Published pick state: native generation + panelIndices snapshot of the last VALID
+    // render, updated atomically. Null while a model/mapping rebuild is in flight.
+    this.pickState = null;
     const savedAA=Number(localStorage.getItem('viewportAA')??1);this.aaMode=[0,1,2,3].includes(savedAA)?savedAA:1;
     // Use a mild default; stored choices always win over the default.
     const savedSharpen=Number(localStorage.getItem('viewportSharpen')??25);this.sharpen=Number.isFinite(savedSharpen)?Math.min(100,Math.max(0,Math.round(savedSharpen))):25;
@@ -183,7 +191,28 @@ export class Dx12Viewport {
     const gp=v.grid.geometry.attributes.position;
     f.set([v.grid.position.x,v.grid.position.z,v.grid.geometry.boundingBox.max.x*2,Math.abs(gp.getZ(4)-gp.getZ(0))||1],68);
     f[72]=this.sharpen/100;
+    // Object-selection flag (sharpening.y). The outline is a screen-space post-AA
+    // ring in outputMain using the selection mask; no per-frame color slots needed.
+    f[73]=this.objectSelected?1:0;
     return out;
+  }
+  setObjectSelected(on) { this.objectSelected = !!on; this.viewer.requestRender(); }
+  // GPU picking: read the selection mask at the click's render-res pixel.
+  // Returns nativeId+1 (0 = empty space).
+  // Returns {panelIndex,hit} for a valid response, or null for a stale/invalid one
+  // (caller must NOT treat null as an empty-space click / deselect).
+  async pick(clientX, clientY) {
+    const snap = this.pickState;
+    const rect = this.canvas.getBoundingClientRect();
+    if (!snap || !rect.width || !rect.height) return null;
+    const fw = this.lastFrame?.renderWidth || rect.width, fh = this.lastFrame?.renderHeight || rect.height;
+    const x = Math.round((clientX - rect.left) / rect.width * fw), y = Math.round((clientY - rect.top) / rect.height * fh);
+    const r = await window.api.dx12Pick(x, y);
+    // Accept only if the response belongs to the same published generation AND the
+    // snapshot is still the current valid state (no rebuild/superseding render since).
+    if (!r || r.gen !== snap.gen || this.pickState !== snap) return null;
+    if (r.id === 0) return { panelIndex: -1, hit: false };
+    return { panelIndex: snap.panelIndices[r.id - 1] ?? -1, hit: true };
   }
   drawHelpers() {
     const v=this.viewer,c=this.helpers,ratio=Math.min(window.devicePixelRatio,2),w=Math.max(1,Math.round(v.container.clientWidth*ratio)),h=Math.max(1,Math.round(v.container.clientHeight*ratio));
@@ -223,12 +252,18 @@ export class Dx12Viewport {
         this.dirty=false;this.canvas.hidden=false; this.object.updateMatrixWorld(true);
         const key=this.sceneKey();
         const poseKey=this.sceneKey(true);
-        if(key!==this.loadedKey) { const stackIds=[],panelIndices=[]; await window.api.dx12Model(nativeModel(this.object,false,this.materialAssign,stackIds,panelIndices)); await window.api.dx12MaterialStacks(stackIds); this.panelIndices=panelIndices; this.loadedKey=key;this.loadedPoseKey=poseKey;this.loadedParamKey=''; }
+        if(key!==this.loadedKey) { this.pickState=null; this.viewer.invalidatePick(); const stackIds=[],panelIndices=[]; await window.api.dx12Model(nativeModel(this.object,false,this.materialAssign,stackIds,panelIndices)); await window.api.dx12MaterialStacks(stackIds); this.panelIndices=panelIndices; this.loadedKey=key;this.loadedPoseKey=poseKey;this.loadedParamKey=''; }
         else if(poseKey!==this.loadedPoseKey) { await window.api.dx12Pose(nativeModel(this.object,true));this.loadedPoseKey=poseKey; }
         const paramKey=JSON.stringify(this.instances);
         if(paramKey!==this.loadedParamKey && this.panelIndices.length) { const pd=packMaterialParams(this.library,this.instances,this.panelIndices,this.stride,this.panelIndices.length); await window.api.dx12Params(pd.buffer); this.loadedParamKey=paramKey; }
         const result=await window.api.dx12Render(this.frame());
-        this.lastFrame=result;this.status.textContent=`DX12 Ultimate · ${result.antialiasing||'MSAA 4x'} · ${result.renderMs.toFixed(1)} ms`;
+        this.lastFrame=result;
+        // Publish a new pick snapshot only when the model/mapping generation changes;
+        // ordinary frame advancement (AA convergence/animation) keeps the same object so
+        // in-flight clicks are not cancelled by mere frame timing.
+        if(!this.pickState||this.pickState.gen!==result.modelGen||this.pickState.panelIndices!==this.panelIndices)
+          this.pickState={gen:result.modelGen,panelIndices:this.panelIndices};
+        this.status.textContent=`DX12 Ultimate · ${result.antialiasing||'MSAA 4x'} · ${result.renderMs.toFixed(1)} ms`;
         // Finish temporal convergence even when the camera/model becomes still.
         // Presentation acknowledgement already paces frames and bounds GPU leases.
         if(result.shadowAccumulating||result.aaAccumulating)this.dirty=true;

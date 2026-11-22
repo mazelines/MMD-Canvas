@@ -10,6 +10,14 @@ A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
 
+## v0.9.0: Viewport object selection and screen-space selection outline
+
+Like Unreal/Blender editors, **clicking the viewport selects the loaded object**, shown as a light-orange **outer silhouette ring** computed in screen space. It is separate from the toon outline, appears even on flat and open surfaces, stays stable regardless of AA phase, and leaves no ghosting on select/deselect. The clicked material is separately synced as the edit target in the material inspector.
+
+- **GPU mask picking:** picking reads back a native selection/ID mask, so texture alpha, `alphaTest`, and hierarchy visibility match the screen (surfaces behind alpha holes, hidden nodes, and translucency are handled correctly). Model/mapping generation checks invalidate delayed responses and model-swap races.
+- **Gesture discrimination:** camera drags, gizmo manipulation, return-to-start drags, and `pointercancel` are not treated as selection. Clicking empty space or Esc deselects.
+- Ring width stays constant (left-right symmetric) across all MSAA/DLAA/DLSS modes, with no flicker on a static view. [Architecture](native-dx12.md) · [0.9.0 release notes](release-notes/v0.9.0.md).
+
 ## v0.8.3: Bundled example DepthRim settings
 
 All 23 materials in the bundled Zhuang Fangyi example now use DepthRimLight **width 0.81, depth bias 0.01, fade 0.04, intensity 1.05 and white rim color**. [0.8.3 changes](release-notes/v0.8.3.md).

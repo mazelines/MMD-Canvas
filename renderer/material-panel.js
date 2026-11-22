@@ -28,6 +28,7 @@ export class MaterialPanel {
     });
     this.$('texture-close').addEventListener('click', () => this.$('texture-dialog').close());
     viewer.onMaterialsChanged = () => { this.updateTransparency(); this.renderDetail(); };
+    this.onSelect = null; // (panelIndex) => void, sync viewport selection outline
     this.load();
   }
 
@@ -39,6 +40,18 @@ export class MaterialPanel {
     this.$('material-tab-count').textContent = this.entries.length;
     this.$('texture-dialog').close();
     this.renderList(); this.renderDetail();
+  }
+
+  // Select a material as the inspector edit target (from the list or viewport picking).
+  // `solo` re-applies solo visibility (list clicks); viewport picking passes solo=false so
+  // selecting the object does not hide other materials. onSelect is an edit-target hook;
+  // the object selection outline is driven separately by the viewport.
+  select(i, focus = true, solo = true) {
+    this.selected = i;
+    if (solo && this.savedVisibility) this.entries.forEach((_, j) => this.viewer.setMaterialVisible(j, j === i));
+    this.renderList(); this.renderDetail();
+    if (focus) this.$('materials').querySelector(`[data-index="${i}"] button`)?.focus();
+    this.onSelect?.(i);
   }
 
   // Shader state mirror from main (library + per-material instances). Sync the
@@ -91,12 +104,7 @@ export class MaterialPanel {
           node('small', { textContent: t`${entry.material.type.replace(/^Mesh|Material$/g, '')} · 삼각형 ${number(entry.triangles)}` })),
         node('span', { className: 'material-index', textContent: String(i + 1).padStart(2, '0') }));
       button.setAttribute('aria-pressed', String(i === this.selected));
-      button.addEventListener('click', () => {
-        this.selected = i;
-        if (this.savedVisibility) this.entries.forEach((_, j) => this.viewer.setMaterialVisible(j, j === i));
-        this.renderList(); this.renderDetail();
-        this.$('materials').querySelector(`[data-index="${i}"] button`)?.focus();
-      });
+      button.addEventListener('click', () => this.select(i));
       const row = node('li', { className: i === this.selected ? 'active' : '' }, checkbox, button);
       row.dataset.index = i;
       list.append(row);

@@ -142,6 +142,12 @@ export class Dx12Host {
     if (!result.ok) throw new Error(result.error || 'Material stack assignment failed');
     return result;
   }
+  async pick(x, y) {
+    const buf = Buffer.alloc(8);
+    buf.writeUInt32LE(x >>> 0, 0); buf.writeUInt32LE(y >>> 0, 4);
+    const result = await this.serial(() => this.request('pick', 10, buf));
+    return { id: result.id ?? 0, gen: result.gen ?? 0 };
+  }
   async render(bytes) {
     if (!(bytes instanceof ArrayBuffer) || bytes.byteLength !== 308) throw new Error('Invalid native frame packet');
     // Backpressure: the native command loop must stay free to receive release

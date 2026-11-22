@@ -307,6 +307,7 @@ handleHost('dx12:shader', async (host, layers) => {
 });
 handleHost('dx12:params', (host, data) => host.setParams(data));
 handleHost('dx12:matstacks', (host, stackIds) => host.materialStacks(stackIds));
+handleHost('dx12:pick', (host, x, y) => host.pick(x, y));
 handleHost('dx12:stop', (host) => host.stop());
 
 // Shader stack editor window: main owns the state, compiles, hot-swap, and
