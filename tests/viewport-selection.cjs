@@ -21,9 +21,9 @@ app.on('browser-window-created',(_e,win)=>win.webContents.once('did-finish-load'
       const mat=()=>new THREE.MeshLambertMaterial({color:0x444444,side:THREE.DoubleSide});
       v.camera.position.set(0,0,6);v.camera.lookAt(0,0,0);v.camera.fov=50;v.camera.aspect=1;v.camera.near=.01;v.camera.far=100;v.camera.updateProjectionMatrix();v.camera.updateMatrixWorld();
       const out={};
-      const setScene=object=>{object.updateMatrixWorld(true);v.current={object,materials:collectMaterials(object)};};
+      const setScene=object=>{object.updateMatrixWorld(true);v.current={object,materials:collectMaterials(object),shading:{getEmission:()=>null,setEmission:()=>{}}};};
       const loadScene=async object=>{v.dx12.pickState=null;setScene(object);await api.dx12Model(nativeModel(object));const idx=[];nativeModel(object,false,null,null,idx);await api.dx12MaterialStacks(idx.map(()=>0));v.dx12.panelIndices=idx;};
-      const draw=async(sel,mode=0)=>{v.dx12.objectSelected=sel;const data=v.dx12.frame(),f=new Float32Array(data,4);f[44]=f[45]=512;f[50]=f[51]=f[53]=0;f[59]=0;f[63]=0;f[67]=mode;f[72]=0;const info=await api.dx12Render(data);v.dx12.lastFrame=info;if(!v.dx12.pickState||v.dx12.pickState.gen!==info.modelGen||v.dx12.pickState.panelIndices!==v.dx12.panelIndices)v.dx12.pickState={gen:info.modelGen,panelIndices:v.dx12.panelIndices};const c=document.getElementById('dx12-canvas');return {info,pixels:c.getContext('2d').getImageData(0,0,512,512).data};};
+      const draw=async(panel=-1,mode=0)=>{v.dx12.selectionPanel=panel;const data=v.dx12.frame(),f=new Float32Array(data,4);f[44]=f[45]=512;f[50]=f[51]=f[53]=0;f[59]=0;f[63]=0;f[67]=mode;f[72]=0;const info=await api.dx12Render(data);v.dx12.lastFrame=info;if(!v.dx12.pickState||v.dx12.pickState.gen!==info.modelGen||v.dx12.pickState.panelIndices!==v.dx12.panelIndices)v.dx12.pickState={gen:info.modelGen,panelIndices:v.dx12.panelIndices};const c=document.getElementById('dx12-canvas');return {info,pixels:c.getContext('2d').getImageData(0,0,512,512).data};};
       const pick=async(x=0,y=0)=>{const rect=v.canvas.getBoundingClientRect();let res={p:-1,h:false};v.onPick=(p,h)=>res={p,h};await v.pickAt(rect.left+rect.width*(x*.5+.5),rect.top+rect.height*(-y*.5+.5));return res;};
       const diff=(a,b)=>{let changed=0,max=0;for(let i=0;i<a.length;i+=4)for(let j=0;j<3;j++){const d=Math.abs(a[i+j]-b[i+j]);if(d>2)changed++;max=Math.max(max,d);}return {changed,max};};
       // Ring-geometry stability: XOR of orange-ring pixel sets (ignores DLSS scene
@@ -33,22 +33,22 @@ app.on('browser-window-created',(_e,win)=>win.webContents.once('did-finish-load'
       const click=(fx,fy,type='pointerup')=>{const rect=v.canvas.getBoundingClientRect();v.canvas.dispatchEvent(new PointerEvent('pointerdown',{clientX:rect.left+rect.width*fx,clientY:rect.top+rect.height*fy,button:0,pointerId:7}));if(type==='pointerup')v.canvas.dispatchEvent(new PointerEvent('pointerup',{clientX:rect.left+rect.width*fx,clientY:rect.top+rect.height*fy,button:0,pointerId:7}));else v.canvas.dispatchEvent(new PointerEvent(type,{clientX:rect.left+rect.width*fx,clientY:rect.top+rect.height*fy,button:0,pointerId:7}));};
       // multi-mesh: click mesh B -> global panel index 1.
       const group=new THREE.Group(),a=new THREE.Mesh(new THREE.PlaneGeometry(1,2),mat()),b=new THREE.Mesh(new THREE.PlaneGeometry(1,2),mat());a.position.x=-1;b.position.x=1;group.add(a,b);
-      await loadScene(group);await draw(false);
+      await loadScene(group);await draw(-1);
       const sb=new THREE.Vector3(1,0,0).project(v.camera);
       out.multiMesh=await pick(sb.x,sb.y);
       // alpha hole: transparent front (alpha 0) over opaque rear -> rear (1).
       const texture=new THREE.DataTexture(new Uint8Array([255,255,255,0]),1,1);texture.needsUpdate=true;
       const transparent=mat();transparent.transparent=true;transparent.map=texture;
       const geometry=mergeGeometries([new THREE.PlaneGeometry(2,2).translate(0,0,1),new THREE.PlaneGeometry(2,2)],true);
-      await loadScene(new THREE.Mesh(geometry,[transparent,mat()]));await draw(false);
+      await loadScene(new THREE.Mesh(geometry,[transparent,mat()]));await draw(-1);
       out.alphaHole=await pick();
       // visible translucent (opacity .25) must be pickable.
       const semi=mat();semi.transparent=true;semi.opacity=.25;
-      await loadScene(new THREE.Mesh(new THREE.PlaneGeometry(2,2),semi));await draw(false);
+      await loadScene(new THREE.Mesh(new THREE.PlaneGeometry(2,2),semi));await draw(-1);
       out.translucent=await pick();
       // hidden front node not picked; rear (1) wins.
       const hiddenGroup=new THREE.Group();const front=new THREE.Mesh(new THREE.PlaneGeometry(2,2),mat()),rear=new THREE.Mesh(new THREE.PlaneGeometry(2,2),mat());front.position.z=1;front.visible=false;hiddenGroup.add(front,rear);
-      await loadScene(hiddenGroup);await draw(false);
+      await loadScene(hiddenGroup);await draw(-1);
       out.hiddenObject=await pick();
       // gizmo release ordering must not leak a pick.
       let pickCalls=0;v.onPick=()=>pickCalls++;const rect=v.canvas.getBoundingClientRect();
@@ -68,67 +68,77 @@ app.on('browser-window-created',(_e,win)=>win.webContents.once('did-finish-load'
       await new Promise(r2=>setTimeout(r2,200));out.pointerCancel={pickCalls};
       // front plane + sphere outline visible.
       await loadScene(new THREE.Mesh(new THREE.PlaneGeometry(2,2),mat()));
-      const planeOff=await draw(false),planeOn=await draw(true);out.frontPlaneOutline=diff(planeOff.pixels,planeOn.pixels);
+      const planeOff=await draw(-1),planeOn=await draw(0);out.frontPlaneOutline=diff(planeOff.pixels,planeOn.pixels);
       await loadScene(new THREE.Mesh(new THREE.SphereGeometry(1,32,24),mat()));
-      const sphereOff=await draw(false),sphereOn=await draw(true);out.sphereOutline=diff(sphereOff.pixels,sphereOn.pixels);
+      const sphereOff=await draw(-1),sphereOn=await draw(0);out.sphereOutline=diff(sphereOff.pixels,sphereOn.pixels);
       // consecutive-frame ring stability while selected (non-jittered mask), per AA mode.
       out.stability=[];
-      for(const mode of [0,1,2,3]){let prev=await draw(true,mode);let maxDiff=0;for(let i=0;i<8;i++){const cur=await draw(true,mode);maxDiff=Math.max(maxDiff,ringDiff(prev.pixels,cur.pixels));prev=cur;}out.stability.push({mode,maxDiff});}
+      for(const mode of [0,1,2,3]){let prev=await draw(0,mode);let maxDiff=0;for(let i=0;i<8;i++){const cur=await draw(0,mode);maxDiff=Math.max(maxDiff,ringDiff(prev.pixels,cur.pixels));prev=cur;}out.stability.push({mode,maxDiff});}
       // temporal select/deselect ring stability.
       out.temporal=[];
-      for(const mode of [1,2,3]){let baseline,settled;for(let i=0;i<36;i++)baseline=await draw(false,mode);const selected=await draw(true,mode);for(let i=0;i<36;i++)settled=await draw(true,mode);const deselected=await draw(false,mode);out.temporal.push({mode,selectedVsSettled:ringDiff(selected.pixels,settled.pixels),deselectedVsBaseline:ringDiff(deselected.pixels,baseline.pixels)});}
-      // REAL app wiring: click object -> objectSelected + inspector edit target; Esc/empty clear.
-      v.onPick=appOnPick;await loadScene(new THREE.Mesh(new THREE.SphereGeometry(1,32,24),mat()));await draw(false);
+      for(const mode of [1,2,3]){let baseline,settled;for(let i=0;i<36;i++)baseline=await draw(-1,mode);const selected=await draw(0,mode);for(let i=0;i<36;i++)settled=await draw(0,mode);const deselected=await draw(-1,mode);out.temporal.push({mode,selectedVsSettled:ringDiff(selected.pixels,settled.pixels),deselectedVsBaseline:ringDiff(deselected.pixels,baseline.pixels)});}
+      // REAL app wiring: click mesh -> per-mesh selection + inspector edit target; Esc/empty clear.
+      v.onPick=appOnPick;await loadScene(new THREE.Mesh(new THREE.SphereGeometry(1,32,24),mat()));await draw(-1);
       click(.5,.5);await new Promise(r2=>setTimeout(r2,300));
-      out.realClick={objectSelected:v.dx12.objectSelected,inspectorSelected:window.__materialPanel?window.__materialPanel.selected:null};
+      out.realClick={selectionPanel:v.dx12.selectionPanel,inspectorSelected:window.__materialPanel?window.__materialPanel.selected:null};
       window.dispatchEvent(new KeyboardEvent('keydown',{code:'Escape'}));await new Promise(r2=>setTimeout(r2,100));
-      out.esc={objectSelected:v.dx12.objectSelected};
+      out.esc={selectionPanel:v.dx12.selectionPanel};
       click(.5,.5);await new Promise(r2=>setTimeout(r2,300));
       click(.02,.02);await new Promise(r2=>setTimeout(r2,300));
-      out.emptyClick={objectSelected:v.dx12.objectSelected};
+      out.emptyClick={selectionPanel:v.dx12.selectionPanel};
       // stale mask: model B uploaded but not rendered -> pick must read empty, not A's mask.
-      await loadScene(new THREE.Mesh(new THREE.PlaneGeometry(2,2),mat()));await draw(false);
+      await loadScene(new THREE.Mesh(new THREE.PlaneGeometry(2,2),mat()));await draw(-1);
       const sideB=new THREE.Mesh(new THREE.PlaneGeometry(.5,.5),mat());sideB.position.x=2;
       await api.dx12Model(nativeModel(sideB));v.dx12.panelIndices=[0]; // no render yet
       out.stalePick=await pick();
-      await draw(false);out.afterBFrame=await pick();
+      await draw(-1);out.afterBFrame=await pick();
       // second material click drives inspector edit target to panel index 1.
       const g2=new THREE.Group(),mA=new THREE.Mesh(new THREE.PlaneGeometry(1,2),mat()),mB=new THREE.Mesh(new THREE.PlaneGeometry(1,2),mat());mA.position.x=-1;mB.position.x=1;g2.add(mA,mB);
-      await loadScene(g2);await draw(false);v.onPick=appOnPick;
+      await loadScene(g2);await draw(-1);v.onPick=appOnPick;
       const sB=new THREE.Vector3(1,0,0).project(v.camera);
       click(sB.x*.5+.5,.5);await new Promise(r2=>setTimeout(r2,300));
-      out.secondMaterial={objectSelected:v.dx12.objectSelected,inspectorSelected:window.__materialPanel.selected};
+      out.secondMaterial={selectionPanel:v.dx12.selectionPanel,inspectorSelected:window.__materialPanel.selected};
+      // per-mesh outline granularity: selecting panel 1 rings ONLY mesh B (right half),
+      // never mesh A (left half). Whole-object outlining would ring both halves.
+      await loadScene(g2);await draw(-1);
+      const pmB=await draw(1);
+      const oc=(px,x0,x1)=>{let n=0;for(let y=0;y<512;y++)for(let x=x0;x<x1;x++){const i=(y*512+x)*4;if(isOrange(px,i))n++;}return n;};
+      out.perMeshOutline={leftA:oc(pmB.pixels,0,256),rightB:oc(pmB.pixels,256,512)};
+      // inspector row click drives the same per-mesh selection via onSelect.
+      await loadScene(g2);await draw(-1);v.dx12.setSelection(-1);
+      window.__materialPanel.select(1,false,false);
+      out.inspectorSelect={selectionPanel:v.dx12.selectionPanel};
       // IPC-timing regressions via real viewer.pickAt wiring (3 cases).
       const rectD=v.canvas.getBoundingClientRect();
       const clickAt=fx=>v.pickAt(rectD.left+rectD.width*fx,rectD.top+rectD.height*0.5);
       // 1) unchanged-frame: a normal frame advance must NOT cancel a valid click.
-      await loadScene(g2);await draw(false);
+      await loadScene(g2);await draw(-1);
       let c1=0,last1;v.onPick=(p,h)=>{c1++;last1={p,h};};
-      const rp=draw(false);const pp=clickAt(0.25);await rp;await pp;await new Promise(r2=>setTimeout(r2,100));
+      const rp=draw(-1);const pp=clickAt(0.25);await rp;await pp;await new Promise(r2=>setTimeout(r2,100));
       out.unchangedFrame={calls:c1,last:last1};
       // 2) rebuild-before-frame: delayed response during rebuild -> no callback; new frame click ok.
-      await loadScene(g2);await draw(false);
+      await loadScene(g2);await draw(-1);
       let c2=0;v.onPick=()=>c2++;
       const p2=clickAt(0.25);
       v.dx12.pickState=null;v.invalidatePick();v.dx12.panelIndices=[1];
       await p2;await new Promise(r2=>setTimeout(r2,100));
       const beforeCalls=c2;
-      await loadScene(g2);await draw(false);
+      await loadScene(g2);await draw(-1);
       let last2b;v.onPick=(p,h)=>{last2b={p,h};};
       await clickAt(0.75);await new Promise(r2=>setTimeout(r2,100));
       out.rebuildBefore={beforeCalls,after:last2b};
       // 3) rebuild-after-frame: rebuild completes a new frame, delayed old response -> no callback.
-      await loadScene(g2);await draw(false);
+      await loadScene(g2);await draw(-1);
       let c3=0;v.onPick=()=>c3++;
       const p3=clickAt(0.25);
-      await loadScene(g2);await draw(false);
+      await loadScene(g2);await draw(-1);
       await p3;await new Promise(r2=>setTimeout(r2,100));
       out.rebuildAfter={calls:c3};
       v.onPick=appOnPick;
       // ring width symmetry on center row (left cluster == right cluster), per mode.
       await loadScene(new THREE.Mesh(new THREE.PlaneGeometry(2,2),mat()));
       out.ringWidth=[];
-      for(const mode of [0,1,2,3]){const {pixels}=await draw(true,mode);const row=256;const orange=[];for(let x=0;x<512;x++){const i=(row*512+x)*4;orange.push(pixels[i]>200&&pixels[i+1]>90&&pixels[i+1]<200&&pixels[i+2]<120);}
+      for(const mode of [0,1,2,3]){const {pixels}=await draw(0,mode);const row=256;const orange=[];for(let x=0;x<512;x++){const i=(row*512+x)*4;orange.push(pixels[i]>200&&pixels[i+1]>90&&pixels[i+1]<200&&pixels[i+2]<120);}
         let L=0,Rt=0;for(let x=0;x<256;x++)if(orange[x])L++;for(let x=256;x<512;x++)if(orange[x])Rt++;
         out.ringWidth.push({mode,left:L,right:Rt});}
       return out;
@@ -145,12 +155,15 @@ app.on('browser-window-created',(_e,win)=>win.webContents.once('did-finish-load'
     assert.ok(r.sphereOutline.changed>100,'sphere outline: '+JSON.stringify(r.sphereOutline));
     for(const s of r.stability)assert.ok(s.maxDiff<=8,'ring stable mode '+s.mode+': '+s.maxDiff);
     for(const t of r.temporal){assert.ok(t.selectedVsSettled<=8,'no ghost select mode '+t.mode+': '+t.selectedVsSettled);assert.ok(t.deselectedVsBaseline<=8,'no ghost deselect mode '+t.mode+': '+t.deselectedVsBaseline);}
-    assert.ok(r.realClick.objectSelected,'real click selects object');
-    assert.equal(r.esc.objectSelected,false,'Esc clears');
-    assert.equal(r.emptyClick.objectSelected,false,'empty click clears');
+    assert.equal(r.realClick.selectionPanel,0,'real click selects mesh 0: '+JSON.stringify(r.realClick));
+    assert.equal(r.esc.selectionPanel,-1,'Esc clears');
+    assert.equal(r.emptyClick.selectionPanel,-1,'empty click clears');
     assert.equal(r.stalePick.h,false,'stale mask before first frame reads empty: '+JSON.stringify(r.stalePick));
     assert.equal(r.afterBFrame.h,false,'side model center empty after frame: '+JSON.stringify(r.afterBFrame));
-    assert.ok(r.secondMaterial.objectSelected,'second material click selects object');
+    assert.equal(r.secondMaterial.selectionPanel,1,'second material click selects mesh 1');
+    assert.ok(r.perMeshOutline.rightB>50,'selected mesh B outlined: '+JSON.stringify(r.perMeshOutline));
+    assert.ok(r.perMeshOutline.leftA<=8,'unselected mesh A NOT outlined: '+JSON.stringify(r.perMeshOutline));
+    assert.equal(r.inspectorSelect.selectionPanel,1,'inspector row click selects mesh via onSelect: '+JSON.stringify(r.inspectorSelect));
     assert.equal(r.secondMaterial.inspectorSelected,1,'inspector edit target = panel 1: '+JSON.stringify(r.secondMaterial));
     assert.equal(r.unchangedFrame.calls,1,'normal frame advance keeps valid click: '+JSON.stringify(r.unchangedFrame));
     assert.ok(r.unchangedFrame.last&&r.unchangedFrame.last.h,'unchanged-frame click hit: '+JSON.stringify(r.unchangedFrame));

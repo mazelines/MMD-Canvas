@@ -10,6 +10,13 @@ A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
 
+## v0.9.1: Per-mesh selection outline
+
+Viewport selection is now **per mesh**. Clicking a mesh draws the light-orange outer silhouette ring **around that mesh only**, instead of the whole loaded object. Selecting a material row in the inspector selects and outlines the same mesh (also the edit target). Clicking empty space or Esc deselects.
+
+- The selection/ID mask already records a per-material identifier, so the outline composites only the ring adjacent to the selected material's region (against the background and against neighbouring meshes). GPU-mask picking, gesture discrimination, and AA stability are unchanged.
+- Ring width stays constant (left-right symmetric) across all MSAA/DLAA/DLSS modes, with no flicker on a static view. [Architecture](native-dx12.md) · [0.9.1 release notes](release-notes/v0.9.1.md).
+
 ## v0.9.0: Viewport object selection and screen-space selection outline
 
 Like Unreal/Blender editors, **clicking the viewport selects the loaded object**, shown as a light-orange **outer silhouette ring** computed in screen space. It is separate from the toon outline, appears even on flat and open surfaces, stays stable regardless of AA phase, and leaves no ghosting on select/deselect. The clicked material is separately synced as the edit target in the material inspector.

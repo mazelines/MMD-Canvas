@@ -109,7 +109,7 @@ export class Dx12Viewport {
     this.materialAssign = []; // panel material index -> shader stackId (synced from main)
     this.library = []; this.instances = []; this.stride = 1; // per-material shader state (synced from main)
     this.panelIndices = []; this.loadedParamKey = '';
-    this.objectSelected = false; // whole loaded object selected (viewport outline)
+    this.selectionPanel = -1; // selected mesh (panel index), -1 = none; per-mesh outline
     // Published pick state: native generation + panelIndices snapshot of the last VALID
     // render, updated atomically. Null while a model/mapping rebuild is in flight.
     this.pickState = null;
@@ -191,12 +191,14 @@ export class Dx12Viewport {
     const gp=v.grid.geometry.attributes.position;
     f.set([v.grid.position.x,v.grid.position.z,v.grid.geometry.boundingBox.max.x*2,Math.abs(gp.getZ(4)-gp.getZ(0))||1],68);
     f[72]=this.sharpen/100;
-    // Object-selection flag (sharpening.y). The outline is a screen-space post-AA
-    // ring in outputMain using the selection mask; no per-frame color slots needed.
-    f[73]=this.objectSelected?1:0;
+    // Per-mesh selection (sharpening.y = selected nativeId+1, 0 = none). The outline
+    // is a screen-space post-AA ring in outputMain around the selected mesh's mask
+    // region; no per-frame color slots needed.
+    const selNative=this.selectionPanel>=0?this.panelIndices.indexOf(this.selectionPanel):-1;
+    f[73]=selNative>=0?selNative+1:0;
     return out;
   }
-  setObjectSelected(on) { this.objectSelected = !!on; this.viewer.requestRender(); }
+  setSelection(panelIndex) { this.selectionPanel = panelIndex >= 0 ? panelIndex : -1; this.viewer.requestRender(); }
   // GPU picking: read the selection mask at the click's render-res pixel.
   // Returns nativeId+1 (0 = empty space).
   // Returns {panelIndex,hit} for a valid response, or null for a stale/invalid one

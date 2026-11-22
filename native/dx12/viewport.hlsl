@@ -413,23 +413,25 @@ void cortao_writeResult(int2 p, float visibility, float3 bentNormal, float3x3 ba
     }
     rgb = lerp(bg, rgb, hdr.a);
     float4 result = float4(encodeSRGB(saturate(rgb)), 1);
-    // Object selection outline (Blender/Unreal style): a uniform outer-silhouette
-    // ring in display space, drawn AFTER temporal reconstruction so the UI highlight
-    // never mixes into AA history. Outer-only: background pixels adjacent to the
-    // selection mask. sharpening.y carries the object-selected flag.
-    if (sharpening.y != 0) {
+    // Per-mesh selection outline (Blender/Unreal style): a uniform outer-silhouette
+    // ring in display space around ONLY the selected mesh, drawn AFTER temporal
+    // reconstruction so the UI highlight never mixes into AA history. Outer-only:
+    // pixels that do not belong to the selected mesh but border it (background or a
+    // neighbouring mesh). sharpening.y carries the selected nativeId+1 (0 = none).
+    uint sel = (uint)sharpening.y;
+    if (sel != 0) {
         // Center and neighbors use the SAME output->mask coordinate map (fractional
         // phase preserved) so the ring is symmetric and width-stable across AA modes.
         float2 outc=float2(tid.xy)+0.5;
         float2 rsc=viewport.xy/aaInfo.xy;
         // round() keeps the fractional phase symmetric for +/- offsets.
         int2 sp=clamp(int2(outc*rsc+0.5),0,int2(viewport.xy)-1);
-        if (selectionMask[sp]==0) {
+        if (selectionMask[sp]!=sel) {
             const int R=2; uint ring=0;
             [unroll] for(int dy=-R;dy<=R;dy++) [unroll] for(int dx=-R;dx<=R;dx++) {
                 if(dx*dx+dy*dy>R*R) continue;
                 int2 q=clamp(int2((outc+float2(dx,dy))*rsc+0.5),0,int2(viewport.xy)-1);
-                ring |= (selectionMask[q]!=0)?1u:0u;
+                ring |= (selectionMask[q]==sel)?1u:0u;
             }
             if(ring!=0) result.rgb=lerp(result.rgb,float3(1.0,0.604,0.239),0.9);
         }
