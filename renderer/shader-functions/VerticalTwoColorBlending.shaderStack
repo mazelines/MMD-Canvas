@@ -3,8 +3,8 @@
   "version": 1,
   "name": "VerticalTwoColorBlending",
   "metadata": {
-    "description": "모델 오브젝트 스페이스의 로컬 Y축 그라디언트. 상단 색 점유율 50%는 선형 보간이며, 0%/100%는 하단/상단 단색입니다. 혼합 강도 1은 이전 결과를 그라디언트로 대체합니다.",
+    "description": "모델 오브젝트 스페이스의 로컬 Y축 그라디언트. 상단 색 점유율 50%는 선형 보간이며, 0%/100%는 하단/상단 단색입니다. 혼합 강도 1은 이전 결과에 그라디언트를 곱하고, 0은 이전 결과를 유지합니다.",
     "tags": ["color", "gradient", "object-space"]
   },
-  "code": "//@property color topColor = (1,0.65,0.2) \"상단 색상\"\n//@property color bottomColor = (0.1,0.25,1) \"하단 색상\"\n//@property float topShare = 50 [0,100] \"상단 색 점유율 (%)\"\n//@property float strength = 1 [0,1] \"혼합 강도\"\nvoid VerticalTwoColorBlending(inout ShadingContext ctx) {\n    float h = saturate(ctx.objectHeight);\n    float share = saturate(topShare / 100.0);\n    float midpoint = 1 - share;\n    float weight;\n    if (share <= 0) weight = 0;\n    else if (share >= 1) weight = 1;\n    else if (h < midpoint) weight = 0.5 * h / max(midpoint, 0.000001);\n    else weight = 0.5 + 0.5 * (h - midpoint) / max(share, 0.000001);\n    ctx.color = lerp(ctx.color, lerp(bottomColor, topColor, weight), saturate(strength));\n}"
+  "code": "//@property color topColor = (1,0.65,0.2) \"상단 색상\"\n//@property color bottomColor = (0.1,0.25,1) \"하단 색상\"\n//@property float topShare = 50 [0,100] \"상단 색 점유율 (%)\"\n//@property float strength = 1 [0,1] \"혼합 강도\"\nvoid VerticalTwoColorBlending(inout ShadingContext ctx) {\n    float h = saturate(ctx.objectHeight);\n    float share = saturate(topShare / 100.0);\n    float midpoint = 1 - share;\n    float weight;\n    if (share <= 0) weight = 0;\n    else if (share >= 1) weight = 1;\n    else if (h < midpoint) weight = 0.5 * h / max(midpoint, 0.000001);\n    else weight = 0.5 + 0.5 * (h - midpoint) / max(share, 0.000001);\n    ctx.color = lerp(ctx.color, ctx.color * lerp(bottomColor, topColor, weight), saturate(strength));\n}"
 }

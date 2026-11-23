@@ -94,24 +94,35 @@ app.on('browser-window-created', (_event, win) => win.webContents.once('did-fini
       const near=(a,b,tolerance=4)=>a.every((c,i)=>Math.abs(c-b[i])<=tolerance);
       const params=async(layers,values)=>{const stride=parseStack(layers).slotCount;await api.dx12Params(packMaterialParams([{layers}],[{stackId:1,params:values}],[0],stride,1,ids).buffer);};
       const reset={id:'reset',name:'Reset',code:'void Reset(inout ShadingContext ctx){ctx.color=0;}'};
-      await api.dx12Shader([gradient]);
+      const input={id:'input',name:'Input',code:'//@property color inputColor = (0.8,0.4,0.6) "Input"\\nvoid Input(inout ShadingContext ctx){ctx.color=inputColor;}'};
+      await api.dx12Shader([input]);
+      const reference=async color=>{await params([input],{input:{inputColor:color}});return sample(await draw(),0.5);};
+      const heights=[0.25,0.5,0.75],refs=[];
+      for(const h of heights)refs.push(await reference([0.8*h,0,0.6*(1-h)]));
+      const strengths=[0,0.5,1],strengthRefs=[];
+      for(const strength of strengths)strengthRefs.push(await reference([0.8*(1-0.5*strength),0.4*(1-strength),0.6*(1-0.5*strength)]));
+      const gradientLayers=[input,gradient],gradientParams=values=>params(gradientLayers,{gradient:values});
+      await api.dx12Shader(gradientLayers);
       const gradientValues={topColor:[1,0,0],bottomColor:[0,0,1],topShare:50};
-      await params([gradient],{gradient:gradientValues});const linear=await draw();
-      const refs=[];
-      for(const h of [0.25,0.5,0.75]) {
-        await params([gradient],{gradient:{topColor:[h,0,1-h],bottomColor:[h,0,1-h]}});
-        const ref=sample(await draw(),h);refs.push(ref);
+      await gradientParams(gradientValues);const linear=await draw();
+      for(const [i,h] of heights.entries()) {
+        const ref=refs[i];
         if(!near(sample(linear,h),ref))throw new Error('Default gradient not linear at '+h+': '+JSON.stringify([sample(linear,h),ref]));
       }
-      await params([gradient],{gradient:{...gradientValues,topShare:75}});const expanded=sample(await draw(),0.5);
+      const blendSamples=[];
+      for(const [i,strength] of strengths.entries()) {
+        await gradientParams({...gradientValues,strength});const actual=sample(await draw(),0.5);blendSamples.push(actual);
+        if(!near(actual,strengthRefs[i]))throw new Error('Multiplicative blend strength '+strength+': '+JSON.stringify([actual,strengthRefs[i]]));
+      }
+      await gradientParams({...gradientValues,topShare:75});const expanded=sample(await draw(),0.5);
       if(expanded[0]<=sample(linear,0.5)[0]||expanded[2]>=sample(linear,0.5)[2])throw new Error('Top occupancy did not expand');
       for(const share of [0,100]) {
-        await params([gradient],{gradient:{...gradientValues,topShare:share}});const img=await draw();
+        await gradientParams({...gradientValues,topShare:share});const img=await draw();
         if(!near(sample(img,0.2),sample(img,0.8),1))throw new Error('Endpoint not constant');
       }
       root.position.set(2,-3,1);root.rotation.set(0.3,0.2,0.5);root.scale.set(1.1,0.7,1.8);root.updateMatrixWorld(true);
       v.camera.position.copy(new THREE.Vector3(0,0,5).applyMatrix4(root.matrixWorld));v.camera.up.copy(new THREE.Vector3(0,1,0).transformDirection(root.matrixWorld));v.camera.lookAt(root.position);v.camera.updateMatrixWorld();
-      await upload();await params([gradient],{gradient:gradientValues});const transformed=await draw();
+      await upload();await gradientParams(gradientValues);const transformed=await draw();
       for(const [i,h] of [0.25,0.5,0.75].entries())if(!near(sample(transformed,h),refs[i],5))throw new Error('Object transform changed gradient');
       const legacy=await draw(true);if(!near(sample(legacy,0.2),sample(legacy,0.8)))throw new Error('Legacy frame packet fallback failed');
       root.position.set(0,0,0);root.rotation.set(0,0,0);root.scale.set(1,1,1);root.updateMatrixWorld(true);
@@ -132,7 +143,7 @@ app.on('browser-window-created', (_event, win) => win.webContents.once('did-fini
       material.color.setRGB(1,1,1);material.map=tex;await upload();await params([reset,emission],{emission:ev});
       const mapped=await draw(),mappedLit=sample(mapped,0.75),mappedDark=sample(mapped,0.25);
       if(!(mappedLit[2]>100&&mappedLit[0]<5&&mappedLit[1]<5&&mappedDark.every(c=>c<5)))throw new Error('Diffuse texture or mask independence failed');
-      return {linear:refs,expanded,lit,dark,custom,clear,missing,mappedLit};
+      return {linear:refs,blendSamples,expanded,lit,dark,custom,clear,missing,mappedLit};
     })()`);
     fs.mkdirSync('tests/out/function-library', {recursive:true});
     fs.writeFileSync('tests/out/function-library/editor.png', (await sw.webContents.capturePage()).toPNG());
