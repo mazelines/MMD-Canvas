@@ -9,7 +9,7 @@ import { readWorkspace, writeWorkspace, networkPaths } from '../src/core/workspa
 import { Dx12Host } from './dx12.js';
 import { compileShaderStack } from './shader-compiler.js';
 import { libraryStride } from '../src/core/shader-stack.js';
-import { readShaderFile, writeShaderFile, shaderContainer } from '../src/core/shader-file.js';
+import { loadShaderAsset, saveShaderAsset, discoverFunctionAssets, readFunctionAsset, writeFunctionAsset, functionContainer } from '../src/core/shader-assets.js';
 import { createUpdateChecker } from './update-checker.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -201,22 +201,27 @@ void ToonBand(inout ShadingContext ctx) {
 //   baseline layers snapshot for dirty detection; dirty = edited since baseline
 function builtinEntries() {
   return BUILTIN_STACKS.map(s => ({
-    name: s.name, outline: s.outline, layers: s.layers.map(l => ({ ...l })),
+    name: s.name, outline: s.outline, layers: s.layers.map(normalizeFunctionLayer),
     metadata: { tags: [] }, source: 'builtin', ref: `builtin:${s.name}`,
-    baseline: s.layers.map(l => ({ ...l })), dirty: false,
+    baseline: s.layers.map(normalizeFunctionLayer), baselineName: s.name, baselineOutline: s.outline, dirty: false,
   }));
 }
 function normalizeEntry(raw) {
-  const layers = Array.isArray(raw?.layers) ? raw.layers.map(l => ({ id: l.id, name: l.name, code: l.code, enabled: l.enabled !== false })) : [];
+  const layers = Array.isArray(raw?.layers) ? raw.layers.map(normalizeFunctionLayer) : [];
   const source = raw?.source === 'builtin' ? 'builtin' : 'file';
   return {
     name: raw?.name || 'Shader', outline: !!raw?.outline, layers,
     metadata: raw?.metadata || { tags: [] }, source,
     ref: raw?.ref || (source === 'builtin' ? `builtin:${raw?.name}` : null),
-    path: raw?.path || null, baseline: raw?.baseline || layers.map(l => ({ ...l })), dirty: !!raw?.dirty,
+    path: raw?.path || null, baseline: (raw?.baseline || layers).map(normalizeFunctionLayer),
+    baselineName: raw?.baselineName ?? raw?.name, baselineOutline: raw?.baselineOutline ?? !!raw?.outline,
+    dirty: !!raw?.dirty, loadError: raw?.loadError,
   };
 }
-const entryDirty = (e) => JSON.stringify(e.layers) !== JSON.stringify(e.baseline);
+const normalizeFunctionLayer = l => ({ id: l.id, name: l.name, code: l.code,
+  ref: l.ref || null, metadata: l.metadata || { tags: [] }, enabled: l.enabled !== false });
+const entryDirty = (e) => JSON.stringify(e.layers) !== JSON.stringify(e.baseline)
+  || e.name !== (e.baselineName ?? e.name) || e.outline !== (e.baselineOutline ?? e.outline);
 let shaderLibrary = builtinEntries();
 let materialInstances = []; // panel material index -> { stackId, params:{layerId:{propName:value}} }
 let materialNames = [];     // display names pushed by the main window
@@ -224,6 +229,9 @@ let previewShaderId = 1;    // library shader (stackId) the editor preview spher
 let stackCache = new Map(); // stackId -> { color, aa }
 let stride = 1;             // per-material userParams stride (max stack slot count)
 let shaderDir = null;       // directory holding user .shader files (canvas/model dir + shaders/)
+let functionAssets = [], shaderAssetErrors = [];
+let shaderEdits = Promise.resolve();
+const editShaders = fn => { const task = shaderEdits.then(fn); shaderEdits = task.catch(() => {}); return task; };
 function openShaderWindow() {
   if (shaderWin && !shaderWin.isDestroyed()) { shaderWin.focus(); return; }
   shaderWin = new BrowserWindow({
@@ -234,7 +242,13 @@ function openShaderWindow() {
   shaderWin.loadURL('app://ui/renderer/shader-stack.html');
   shaderWin.on('closed', () => { previewDx12.stop(); shaderWin = null; });
 }
-function shaderState() { return { library: shaderLibrary, instances: materialInstances, materialNames, stride, previewShaderId }; }
+function shaderState() {
+  const catalog = new Map(functionAssets.map(a => [a.ref, a]));
+  for (const entry of shaderLibrary) for (const layer of entry.layers) if (layer.ref)
+    catalog.set(layer.ref, { name: layer.name, code: layer.code, ref: layer.ref, metadata: layer.metadata });
+  return { library: shaderLibrary, instances: materialInstances, materialNames, stride, previewShaderId,
+    functions: [...catalog.values()], assetErrors: shaderAssetErrors };
+}
 function notifyShaderApplied() {
   // Direct render kick: reliable across the multi-window setup where the IPC
   // event alone may not restart a converged flush. Kick both viewports.
@@ -318,19 +332,19 @@ handle('shader-stack:library-get', () => shaderState());
 // the main host gets the whole library (opcode 8, with outline flags); the preview
 // host gets the selected material's stack as its base shader (opcode 6). Per-material
 // parameter values are packed and uploaded by the renderer (nativeModel/flush).
-async function compileLibrary() {
-  stride = libraryStride(shaderLibrary);
+async function buildShaderLibrary(library) {
+  const nextStride = libraryStride(library);
   const cache = new Map();
-  for (let i = 0; i < shaderLibrary.length; i++) {
-    const blobs = await compileShaderStack(shaderLibrary[i].layers || [], stride);
+  for (let i = 0; i < library.length; i++) {
+    const blobs = await compileShaderStack(library[i].layers || [], nextStride);
     cache.set(i + 1, blobs);
   }
-  stackCache = cache;
+  return { stride: nextStride, cache };
 }
-async function loadShaderLibrary() {
+async function loadShaderLibrary(compile = true) {
   const hosts = [dx12, previewDx12].filter(h => h.child && h.capabilities);
   if (!hosts.length) return;
-  await compileLibrary();
+  if (compile) { const next = await buildShaderLibrary(shaderLibrary); stride = next.stride; stackCache = next.cache; }
   const stacks = [...stackCache].map(([stackId, b]) => ({ stackId, outline: shaderLibrary[stackId - 1]?.outline ? 1 : 0, color: b.color, aa: b.aa }));
   for (const host of hosts) {
     if (host === previewDx12) {
@@ -341,6 +355,35 @@ async function loadShaderLibrary() {
     }
   }
 }
+// Publish only a fully compiled library. Failed edits leave both the running shader
+// and its parameter layout intact; the editor retains its local source for correction.
+async function commitShaderLibrary(candidate, save) {
+  const next = await buildShaderLibrary(candidate);
+  if (save) await save();
+  const previous = { library: shaderLibrary, stride, cache: stackCache };
+  shaderLibrary = candidate; stride = next.stride; stackCache = next.cache;
+  try { await loadShaderLibrary(false); }
+  catch (error) {
+    shaderLibrary = previous.library; stride = previous.stride; stackCache = previous.cache;
+    await loadShaderLibrary(false).catch(() => {});
+    throw error;
+  }
+  notifyShaderApplied(); broadcastShaderUpdated();
+  return shaderState();
+}
+function replaceSharedFunction(library, ref, asset) {
+  return library.map(entry => {
+    const layers = entry.layers.map(layer => layer.ref === ref ? { ...layer, name: asset.name, code: asset.code, metadata: asset.metadata } : layer);
+    const next = { ...entry, layers }; next.dirty = entryDirty(next); return next;
+  });
+}
+function markFunctionSaved(library, ref, asset) {
+  return library.map(entry => {
+    const baseline = entry.baseline.map(layer => layer.ref === ref
+      ? { ...layer, name: asset.name, code: asset.code, metadata: asset.metadata } : layer);
+    const next = { ...entry, baseline }; next.dirty = entryDirty(next); return next;
+  });
+}
 // Best-effort load: store state first so a workspace restore persists even if the
 // renderer is not ready; the load itself must not abort the caller.
 async function applyLibrary() {
@@ -349,12 +392,11 @@ async function applyLibrary() {
   notifyShaderApplied();
   return loadError;
 }
-ipcMain.handle('shader-stack:library-set', async (_e, library) => {
-  shaderLibrary = (Array.isArray(library) ? library : []).map(normalizeEntry);
+handle('shader-stack:library-set', library => editShaders(async () => {
+  await commitShaderLibrary((Array.isArray(library) ? library : []).map(normalizeEntry));
   for (const inst of materialInstances) if (inst.stackId > shaderLibrary.length) inst.stackId = 0;
-  const err = await applyLibrary(); broadcastShaderUpdated();
-  return err ? { ok: false, error: err } : { ok: true, value: shaderState() };
-});
+  return shaderState();
+}));
 ipcMain.handle('shader-stack:restore', async (_e, { instances, shaderFiles, baseDir }) => {
   setShaderDir(baseDir);
   await rebuildLibrary(shaderFiles || []);
@@ -364,16 +406,27 @@ ipcMain.handle('shader-stack:restore', async (_e, { instances, shaderFiles, base
   const err = await applyLibrary(); broadcastShaderUpdated();
   return err ? { ok: false, error: err } : { ok: true, value: shaderState() };
 });
-ipcMain.handle('shader-stack:stack-apply', async (_e, { stackId, layers, outline }) => {
+handle('shader-stack:stack-apply', ({ stackId, layers, outline, name }) => editShaders(async () => {
   const idx = stackId - 1;
-  if (idx < 0 || idx >= shaderLibrary.length) return { ok: false, error: 'Invalid stackId' };
-  const entry = shaderLibrary[idx];
-  entry.layers = Array.isArray(layers) ? layers.map(l => ({ id: l.id, name: l.name, code: l.code, enabled: l.enabled !== false })) : [];
+  if (idx < 0 || idx >= shaderLibrary.length) throw new Error('Invalid stackId');
+  if (shaderLibrary[idx].loadError) throw new Error(shaderLibrary[idx].loadError);
+  let candidate = shaderLibrary.map(e => ({ ...e, layers: e.layers.map(l => ({ ...l })) }));
+  const entry = candidate[idx], incoming = Array.isArray(layers) ? layers.map(normalizeFunctionLayer) : [];
+  const changes = new Map();
+  for (const layer of incoming) if (layer.ref) {
+    const old = shaderLibrary.flatMap(e => e.layers).find(l => l.ref === layer.ref);
+    if (old && (old.code !== layer.code || old.name !== layer.name)) {
+      if (changes.has(layer.ref) && changes.get(layer.ref).code !== layer.code) throw new Error(`함수 편집 충돌: ${layer.ref}`);
+      changes.set(layer.ref, layer);
+    }
+  }
+  entry.layers = incoming;
   if (outline !== undefined) entry.outline = !!outline;
+  if (name !== undefined) entry.name = String(name).slice(0, 128);
   entry.dirty = entryDirty(entry);
-  const err = await applyLibrary(); broadcastShaderUpdated();
-  return err ? { ok: false, error: err } : { ok: true, value: shaderState() };
-});
+  for (const [ref, asset] of changes) candidate = replaceSharedFunction(candidate, ref, asset);
+  return commitShaderLibrary(candidate);
+}));
 // Per-material instance property values (Unity-style material instances). The
 // renderer re-packs userParams on the next flush; no recompile needed.
 handle('shader-stack:instance-params', ({ materialIndex, values }) => {
@@ -423,14 +476,22 @@ async function rebuildLibrary(extraRefs = []) {
   files.sort();
   for (const f of files) {
     try {
-      const c = await readShaderFile(f);
+      const c = await loadShaderAsset(f);
       const ref = refForPath(f);
       if (seen.has(ref)) continue;
       seen.add(ref);
-      entries.push({ name: c.name, outline: c.outline, layers: c.layers, metadata: c.metadata, source: 'file', ref, path: f, baseline: c.layers.map(l => ({ ...l })), dirty: false });
-    } catch { /* skip invalid .shader */ }
+      entries.push(normalizeEntry({ name: c.name, outline: c.outline, layers: c.layers, metadata: c.metadata, source: 'file', ref, path: f, dirty: false }));
+    } catch (error) {
+      // Keep the referenced entry and expose the problem; never silently save a
+      // missing dependency as a shader with its function removed.
+      entries.push({ name: path.basename(f), outline: false, layers: [], metadata: {}, source: 'file',
+        ref: refForPath(f), path: f, baseline: [], dirty: false, loadError: error.message });
+    }
   }
   shaderLibrary = entries;
+  const discovered = await discoverFunctionAssets(shaderDir);
+  functionAssets = discovered.assets;
+  shaderAssetErrors = [...discovered.errors, ...entries.filter(e => e.loadError).map(e => ({ path: e.path, message: e.loadError }))];
 }
 handle('shader-stack:set-dir', async (baseDir) => {
   setShaderDir(baseDir);
@@ -445,31 +506,73 @@ async function saveEntryCore(stackId, saveAs) {
   const idx = stackId - 1;
   const entry = shaderLibrary[idx];
   if (!entry) throw new Error('Invalid stackId');
-  const container = shaderContainer(entry);
+  if (entry.loadError) throw new Error(entry.loadError);
   let target = (entry.source === 'file' && entry.path && !saveAs) ? entry.path : null;
   if (!target) {
-    const name = (container.name || 'Shader').replace(/[^\w가-힣.-]+/g, '_');
+    const name = (entry.name || 'Shader').replace(/[^\w가-힣.-]+/g, '_');
     const sel = await dialog.showSaveDialog(win, { defaultPath: path.join(shaderDir || app.getPath('documents'), `${name}.shader`), filters: [{ name: t('셰이더'), extensions: ['shader'] }] });
     if (sel.canceled || !sel.filePath) return null;
     target = sel.filePath;
     if (path.extname(target).toLowerCase() !== '.shader') target += '.shader';
   }
-  await writeShaderFile(target, container);
+  const container = await saveShaderAsset(target, entry);
+  for (const layer of container.layers) shaderLibrary = markFunctionSaved(shaderLibrary, layer.ref, layer);
+  // markFunctionSaved creates entries; continue with the updated selected entry.
+  const savedEntry = shaderLibrary[idx];
   const ref = refForPath(target);
   let selected = stackId;
   if (entry.source === 'builtin') {
-    entry.layers = entry.baseline.map(l => ({ ...l })); entry.outline = BUILTIN_STACKS[idx]?.outline ?? entry.outline; entry.dirty = false;
-    shaderLibrary.push({ name: container.name, outline: container.outline, layers: container.layers, metadata: container.metadata, source: 'file', ref, path: target, baseline: container.layers.map(l => ({ ...l })), dirty: false });
+    savedEntry.layers = savedEntry.baseline.map(l => ({ ...l })); savedEntry.name = savedEntry.baselineName ?? savedEntry.name; savedEntry.outline = BUILTIN_STACKS[idx]?.outline ?? savedEntry.outline; savedEntry.dirty = false;
+    shaderLibrary.push(normalizeEntry({ name: container.name, outline: container.outline, layers: container.layers, metadata: container.metadata, source: 'file', ref, path: target, dirty: false }));
     selected = shaderLibrary.length;
     for (const inst of materialInstances) if (inst.stackId === stackId) inst.stackId = selected;
   } else {
-    entry.path = target; entry.ref = ref; entry.source = 'file'; entry.baseline = container.layers.map(l => ({ ...l })); entry.dirty = false;
+    savedEntry.layers = container.layers; savedEntry.path = target; savedEntry.ref = ref; savedEntry.source = 'file'; savedEntry.baseline = container.layers.map(l => ({ ...l })); savedEntry.dirty = false;
+    savedEntry.baselineName = savedEntry.name; savedEntry.baselineOutline = savedEntry.outline;
   }
   previewShaderId = selected;
   await applyLibrary(); broadcastShaderUpdated();
   return { state: shaderState(), stackId: selected };
 }
-handle('shader-stack:save-entry', async ({ stackId, saveAs }) => saveEntryCore(stackId, saveAs));
+handle('shader-stack:save-entry', ({ stackId, saveAs }) => editShaders(() => saveEntryCore(stackId, saveAs)));
+handle('shader-function:open', () => editShaders(async () => {
+  const selected = await dialog.showOpenDialog(shaderWin || win, { properties: ['openFile'],
+    defaultPath: shaderDir || undefined, filters: [{ name: 'Shader Function', extensions: ['shaderStack'] }] });
+  if (selected.canceled || !selected.filePaths[0]) return null;
+  const ref = path.resolve(selected.filePaths[0]), asset = await readFunctionAsset(ref);
+  // Opening an already loaded function explicitly reloads its shared definition.
+  const candidate = replaceSharedFunction(shaderLibrary, ref, asset);
+  await commitShaderLibrary(candidate);
+  functionAssets = functionAssets.filter(a => a.ref !== ref); functionAssets.push({ ...asset, ref });
+  broadcastShaderUpdated();
+  return { asset: { ...asset, ref }, state: shaderState() };
+}));
+handle('shader-function:save', ({ stackId, layerId, layer: edited, saveAs }) => editShaders(async () => {
+  const entry = shaderLibrary[stackId - 1], original = entry?.layers.find(l => l.id === layerId);
+  if (!original || entry.loadError) throw new Error(entry?.loadError || 'Invalid function layer');
+  const layer = normalizeFunctionLayer({ ...edited, id: layerId, ref: original.ref });
+  const asset = functionContainer(layer);
+  let ref = !saveAs ? original.ref : null;
+  if (!ref) {
+    const stem = asset.name.replace(/[^\w가-힣.-]+/g, '_');
+    const selected = await dialog.showSaveDialog(shaderWin || win, {
+      defaultPath: path.join(shaderDir || app.getPath('documents'), `${stem}.shaderStack`),
+      filters: [{ name: 'Shader Function', extensions: ['shaderStack'] }] });
+    if (selected.canceled || !selected.filePath) return null;
+    ref = selected.filePath;
+    if (!/\.shaderstack$/i.test(ref)) ref += '.shaderStack';
+  }
+  let candidate = replaceSharedFunction(shaderLibrary, ref, asset);
+  candidate = candidate.map((e, i) => {
+    if (i !== stackId - 1) return e;
+    const next = { ...e, layers: e.layers.map(l => l.id === layerId ? { ...layer, ref, metadata: asset.metadata } : l) };
+    next.dirty = entryDirty(next); return next;
+  });
+  candidate = markFunctionSaved(candidate, ref, asset);
+  await commitShaderLibrary(candidate, () => writeFunctionAsset(ref, asset));
+  functionAssets = functionAssets.filter(a => a.ref !== ref); functionAssets.push({ ...asset, ref });
+  broadcastShaderUpdated(); return shaderState();
+}));
 handle('shader-stack:delete-entry', async ({ stackId }) => {
   const idx = stackId - 1;
   const entry = shaderLibrary[idx];
@@ -491,7 +594,7 @@ async function promptSaveDirtyShaders() {
     message: t('수정된 셰이더가 있습니다. .shader 파일로 저장하시겠습니까?'), detail: dirty.map(x => x.e.name).join('\n'),
   });
   if (ans.response !== 0) {
-    for (const { e } of dirty) { e.layers = e.baseline.map(l => ({ ...l })); e.dirty = false; }
+    for (const { e } of dirty) { e.layers = e.baseline.map(l => ({ ...l })); e.name = e.baselineName ?? e.name; e.outline = e.baselineOutline ?? e.outline; e.dirty = false; }
     await applyLibrary(); broadcastShaderUpdated();
     return;
   }
@@ -546,13 +649,13 @@ handle('fs:stat', async (p) => {
 });
 
 // --- .shader asset file I/O (shaders live on disk; the canvas stores references) ---
-handle('shader:read', async (filePath) => readShaderFile(filePath));
+handle('shader:read', async (filePath) => loadShaderAsset(filePath));
 handle('shader:list', async (dir) => {
   const resolved = path.resolve(dir);
   const dirents = await fs.readdir(resolved, { withFileTypes: true }).catch(() => []);
   const files = dirents.filter(d => d.isFile() && path.extname(d.name).toLowerCase() === '.shader').map(d => path.join(resolved, d.name)).sort();
   const out = [];
-  for (const f of files) { try { out.push({ path: f, container: await readShaderFile(f) }); } catch { /* skip invalid */ } }
+  for (const f of files) { try { out.push({ path: f, container: await loadShaderAsset(f) }); } catch { /* library loader exposes dependency errors */ } }
   return out;
 });
 handle('shader:save', async ({ container, filePath, saveAs, defaultDir }) => {
@@ -565,7 +668,8 @@ handle('shader:save', async ({ container, filePath, saveAs, defaultDir }) => {
     target = selected.filePath;
     if (path.extname(target).toLowerCase() !== '.shader') target += '.shader';
   }
-  return { filePath: await writeShaderFile(target, container) };
+  await saveShaderAsset(target, { ...container, path: filePath });
+  return { filePath: target };
 });
 handle('shader:delete', async (filePath) => {
   if (path.extname(filePath).toLowerCase() !== '.shader') throw new Error('Not a .shader file');

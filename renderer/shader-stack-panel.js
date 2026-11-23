@@ -57,8 +57,7 @@ void DepthRimLight(inout ShadingContext ctx) {
 ];
 const BLANK_TEMPLATE = { name: 'Custom', code: `void Custom(inout ShadingContext ctx) {\n    // ctx.color 를 변형하세요\n}` };
 
-let nextId = 1;
-const makeLayer = (name, code) => ({ id: `layer-${nextId++}`, name, code, enabled: true });
+const makeLayer = (name, code) => ({ id: `layer-${crypto.randomUUID()}`, name, code, enabled: true });
 
 // Pure shader-library authoring tool: edit built-in and user shaders as stacks of
 // HLSL functions, save/manage them, and preview the SELECTED shader on a sphere.
@@ -68,15 +67,20 @@ const makeLayer = (name, code) => ({ id: `layer-${nextId++}`, name, code, enable
 export class ShaderStackPanel {
   constructor() {
     this.$ = id => document.getElementById(id);
-    this.library = []; this.stride = 1;
+    this.library = []; this.stride = 1; this.functions = [];
     this.selectedStack = 1; this.previewValues = {}; this.onPreviewChange = null;
     this.selected = -1; this.editor = null; this.applying = false; this.dragIndex = -1; this.popup = null;
-    this.$('shader-add').addEventListener('click', () => this.insertLayer(this.stack.length, SHADER_EXAMPLES[this.stack.length % SHADER_EXAMPLES.length]));
+    this.$('shader-add').addEventListener('click', ev => this.openCatalog(this.stack.length, ev.currentTarget));
     this.$('shader-reset').addEventListener('click', () => { if (this.selectedStack < 1) return; this.library[this.selectedStack - 1].layers = []; this.selected = -1; this.render(); this.apply(); });
     this.$('shader-apply').addEventListener('click', () => this.apply());
     this.$('shader-library-add').addEventListener('click', () => this.addStack());
     this.$('shader-save').addEventListener('click', () => this.saveStack(false));
     this.$('shader-save-as').addEventListener('click', () => this.saveStack(true));
+    this.$('shader-function-open').addEventListener('click', () => this.openFunction());
+    this.$('shader-function-save').addEventListener('click', () => this.saveFunction(false));
+    this.$('shader-function-save-as').addEventListener('click', () => this.saveFunction(true));
+    this.$('shader-function-name').addEventListener('input', e => { if (this.stack[this.selected]) this.stack[this.selected].name = e.target.value; if (this.applying) this.pendingApply = true; });
+    this.$('shader-asset-name').addEventListener('input', e => { if (this.library[this.selectedStack - 1]) this.library[this.selectedStack - 1].name = e.target.value; if (this.applying) this.pendingApply = true; });
     this.$('shader-outline').addEventListener('change', e => { if (this.selectedStack < 1) return; this.library[this.selectedStack - 1].outline = e.target.checked; this.apply(); });
     document.addEventListener('keydown', (ev) => {
       if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;
@@ -94,11 +98,18 @@ export class ShaderStackPanel {
 
   async load() { this.setState(await window.api.shaderStackLibraryGet()); }
   setState(state) {
+    this.committedState = state;
+    if (this.applying) { this.onPreviewChange?.(); return; } // keep local source while adopting committed preview data
     this.library = state.library || []; this.stride = state.stride || 1;
+    this.functions = state.functions || [];
+    const errors = this.$('shader-assets-error');
+    errors.textContent = (state.assetErrors || []).map(e => `${e.path}\n${e.message}`).join('\n\n');
+    errors.hidden = !errors.textContent;
     // Library selection is independent of material assignments: preserve it across
     // broadcasts (which may originate from the main window's material edits).
     if (this.selectedStack > this.library.length) this.selectedStack = this.library.length;
     this.render();
+    this.onPreviewChange?.();
   }
 
   selectStack(stackId) {
@@ -109,31 +120,53 @@ export class ShaderStackPanel {
   }
   async addStack() {
     this.library.push({ name: `${t('스택')} ${this.library.length + 1}`, outline: false, layers: [], source: 'file', ref: null, path: null, metadata: { tags: [] } });
-    try { const st = await window.api.shaderStackLibrarySet(this.library); if (st?.library) this.library = st.library; } catch (e) { this.setError(e.message); }
+    try { const st = await window.api.shaderStackLibrarySet(this.library); if (st?.library) this.setState(st); } catch (e) { this.setError(e.message); return; }
     this.selectStack(this.library.length);
   }
   async deleteStack(stackId) {
     const entry = this.library[stackId - 1];
     if (!entry) return;
     if (entry.source === 'builtin') { this.setError(t('빌트인 셰이더는 삭제할 수 없습니다.')); return; }
-    try { const st = await window.api.shaderStackDeleteEntry(stackId); if (st?.library) { this.library = st.library; this.selectedStack = Math.min(this.selectedStack, this.library.length); } } catch (e) { this.setError(e.message); }
+    try { const st = await window.api.shaderStackDeleteEntry(stackId); if (st?.library) this.setState(st); } catch (e) { this.setError(e.message); return; }
     this.previewValues = {}; this.selected = -1; this.render();
     window.api.shaderStackPreviewShader(this.selectedStack).catch(() => {});
     this.onPreviewChange?.();
   }
   async saveStack(saveAs = false) {
     if (this.selectedStack < 1) return;
+    const layerId = this.stack[this.selected]?.id;
     try {
+      if (!await this.apply()) return;
       const r = await window.api.shaderStackSaveEntry(this.selectedStack, saveAs);
       if (!r) return; // user canceled the save dialog
-      if (r.state?.library) this.library = r.state.library;
+      if (r.state?.library) this.setState(r.state);
       this.selectStack(r.stackId || this.selectedStack);
+      this.selected = this.stack.findIndex(layer => layer.id === layerId); this.render();
       this.$('shader-status').textContent = t('저장됨');
     } catch (e) { this.setError(e.message); }
+  }
+  async openFunction() {
+    try {
+      if (!await this.apply()) return;
+      const result = await window.api.shaderFunctionOpen();
+      if (!result) return;
+      this.setState(result.state);
+      this.insertLayer(this.stack.length, result.asset);
+    } catch (error) { this.setError(error.message); }
+  }
+  async saveFunction(saveAs) {
+    try {
+      if (this.applyTask) await this.applyTask;
+      const layer = this.stack[this.selected]; if (!layer) return;
+      const state = await window.api.shaderFunctionSave(this.selectedStack, layer.id, { ...layer }, saveAs);
+      if (state) { this.setState(state); this.setError(null); this.$('shader-status').textContent = t('저장됨'); }
+    } catch (error) { this.setError(error.message); }
   }
 
   render() {
     this.renderLibrary();
+    this.$('shader-asset-name').value = this.library[this.selectedStack - 1]?.name || '';
+    this.$('shader-asset-name').disabled = this.selectedStack < 1;
     this.$('shader-stack-name').textContent = this.selectedStack >= 1 ? (this.library[this.selectedStack - 1]?.name || '') : t('기본 셰이딩');
     this.renderOutlineToggle();
     this.renderStack();
@@ -171,9 +204,9 @@ export class ShaderStackPanel {
     if (this.selectedStack < 1) { this.setError(t('먼저 스택을 추가/선택하세요.')); return; }
     const existing = new Set(this.stack.map(l => l.name));
     let name = template.name, n = 2;
-    while (existing.has(name)) name = `${template.name}_${n++}`;
-    const code = template.code.replace(/void\s+\w+\s*\(\s*inout\s+ShadingContext/, `void ${name}(inout ShadingContext`);
-    this.stack.splice(index, 0, makeLayer(name, code));
+    while (!template.ref && existing.has(name)) name = `${template.name}_${n++}`;
+    const code = template.ref ? template.code : template.code.replace(/void\s+\w+\s*\(\s*inout\s+ShadingContext/, `void ${name}(inout ShadingContext`);
+    this.stack.splice(index, 0, { ...makeLayer(name, code), ref: template.ref || null, metadata: template.metadata || { tags: [] } });
     this.selected = index;
     this.closePopup(); this.render(); this.apply();
   }
@@ -195,8 +228,9 @@ export class ShaderStackPanel {
     this.closePopup();
     const menu = node('div', { className: 'shader-popup', role: 'menu' });
     menu.append(node('div', { className: 'shader-popup-title', textContent: t('함수 삽입') }));
-    for (const example of [...SHADER_EXAMPLES, BLANK_TEMPLATE]) {
+    for (const example of [...SHADER_EXAMPLES, BLANK_TEMPLATE, ...this.functions]) {
       const item = node('button', { className: 'shader-popup-item', textContent: example.name, role: 'menuitem' });
+      if (example.ref) item.title = example.ref;
       item.addEventListener('click', () => this.insertLayer(index, example));
       menu.append(item);
     }
@@ -225,19 +259,27 @@ export class ShaderStackPanel {
     const insertButton = (index) => {
       const b = node('button', { className: 'shader-insert', textContent: '+', title: t('여기에 함수 삽입'), ariaLabel: t('여기에 함수 삽입') });
       b.addEventListener('click', () => this.openCatalog(index, b));
-      return b;
+      return node('li', { className: 'shader-insert-row', role: 'presentation' }, b);
     };
     if (this.selectedStack < 1) { list.append(node('li', { className: 'material-empty', textContent: t('기본 셰이딩입니다. 스택을 추가하세요.') })); return; }
-    if (!this.stack.length) { list.append(node('li', { className: 'material-empty', textContent: t('+ 를 눌러 셰이더 레이어를 쌓으세요.') })); list.append(insertButton(0)); return; }
+    if (!this.stack.length) { list.append(node('li', { className: 'material-empty', textContent: t('+ 를 눌러 첫 번째 함수를 추가하세요.') })); list.append(insertButton(0)); return; }
+    // Display the same array order passed to the compiler and saved in .shader.
+    // Disabled layers keep their position, but are skipped by execution numbering.
+    let executionOrder = 0;
     this.stack.forEach((layer, i) => {
       list.append(insertButton(i));
-      const row = node('li', { className: i === this.selected ? 'active' : '', draggable: true });
+      const enabled = layer.enabled !== false;
+      const order = enabled ? String(++executionOrder) : '—';
+      const label = enabled ? t('{0}번째 실행: {1}', order, layer.name) : t('실행 건너뜀: {0}', layer.name);
+      const row = node('li', { className: `shader-layer-row${i === this.selected ? ' active' : ''}${enabled ? '' : ' disabled'}`, draggable: true, ariaLabel: label });
       row.dataset.index = i;
-      const toggle = node('input', { type: 'checkbox', checked: layer.enabled, title: t('활성화') });
-      toggle.addEventListener('change', () => { layer.enabled = toggle.checked; this.apply(); });
+      row.dataset.layerId = layer.id;
+      const number = node('span', { className: 'shader-execution-number', textContent: order, title: label, ariaHidden: 'true' });
+      const toggle = node('input', { type: 'checkbox', checked: enabled, title: t('활성화') });
+      toggle.addEventListener('click', ev => ev.stopPropagation());
+      toggle.addEventListener('change', () => { this.stack[i].enabled = toggle.checked; this.renderStack(); this.apply(); });
       const select = node('button', { className: 'shader-select', textContent: layer.name, ariaPressed: String(i === this.selected) });
-      select.addEventListener('click', () => { this.selected = i; this.render(); });
-      row.append(toggle, select);
+      row.append(number, toggle, select);
       row.addEventListener('click', () => { this.selected = i; this.render(); });
       row.addEventListener('contextmenu', (ev) => { ev.preventDefault(); this.openContextMenu(i, ev); });
       row.addEventListener('dragstart', (ev) => { this.dragIndex = i; ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', String(i)); row.classList.add('dragging'); });
@@ -254,6 +296,15 @@ export class ShaderStackPanel {
     const host = this.$('shader-editor-host');
     const layer = this.stack[this.selected];
     this.$('shader-name').textContent = layer ? layer.name : '';
+    this.$('shader-function-name').value = layer?.name || '';
+    this.$('shader-function-name').disabled = !layer;
+    this.$('shader-function-save').disabled = !layer;
+    this.$('shader-function-save-as').disabled = !layer;
+    const uses = layer?.ref ? this.library.reduce((n, e) => n + e.layers.filter(l => l.ref === layer.ref).length, 0) : 0;
+    this.$('shader-function-source').textContent = layer?.ref
+      ? `${layer.ref} · ${t('공유 함수')} (${uses})`
+      : t('함수 저장 시 .shaderStack 파일로 분리됩니다.');
+    this.$('shader-function-source').title = layer?.ref || '';
     if (!layer) {
       if (this.editor) { this.editor.toTextArea(); this.editor = null; }
       host.replaceChildren(node('div', { className: 'muted', textContent: t('레이어를 선택하세요.') }));
@@ -268,7 +319,7 @@ export class ShaderStackPanel {
         indentUnit: 4, tabSize: 4, indentWithTabs: false, lineWrapping: false,
         extraKeys: { 'Ctrl-S': () => this.apply(), 'Cmd-S': () => this.apply() },
       });
-      this.editor.on('change', () => { const current = this.stack[this.selected]; if (current) current.code = this.editor.getValue(); });
+      this.editor.on('change', () => { const current = this.stack[this.selected]; if (current) current.code = this.editor.getValue(); if (this.applying) this.pendingApply = true; });
     }
     if (this.editor.getValue() !== layer.code) this.editor.setValue(layer.code);
   }
@@ -285,23 +336,31 @@ export class ShaderStackPanel {
 
   setError(message) { const box = this.$('shader-error'); box.hidden = !message; box.textContent = message || ''; }
 
-  async apply() {
-    if (this.selectedStack < 1) return;
-    // Coalesce rapid edits: if a compile is running, queue a re-apply so the latest
-    // state (e.g. a quick outline toggle) is never dropped.
-    if (this.applying) { this.pendingApply = true; return; }
+  apply() {
+    if (this.selectedStack < 1) return Promise.resolve(false);
+    if (this.applying) { this.pendingApply = true; return this.applyTask; }
     this.applying = true;
-    this.$('shader-status').textContent = t('컴파일 중…');
-    try {
-      const outline = this.library[this.selectedStack - 1]?.outline;
-      await window.api.shaderStackStackApply(this.selectedStack, this.stack.map(l => ({ id: l.id, name: l.name, code: l.code, enabled: l.enabled })), outline);
-      this.setError(null);
-      this.$('shader-status').textContent = this.stack.some(l => l.enabled) ? t('적용됨') : t('기본 셰이딩');
-    } catch (e) {
-      this.setError(e.message);
-      this.$('shader-status').textContent = t('컴파일 오류');
-    }
-    this.applying = false;
-    if (this.pendingApply) { this.pendingApply = false; this.apply(); }
+    this.applyTask = (async () => {
+      let ok = false;
+      do {
+        this.pendingApply = false;
+        const index = this.selectedStack - 1, snapshot = JSON.stringify(this.library[index]);
+        const entry = JSON.parse(snapshot);
+        this.$('shader-status').textContent = t('컴파일 중…');
+        try {
+          const state = await window.api.shaderStackStackApply(index + 1, entry.layers, entry.outline, entry.name);
+          this.committedState = state;
+          // Preserve newer local keystrokes while adopting shared-function updates.
+          const edited = JSON.stringify(this.library[index]) !== snapshot ? this.library[index] : null;
+          this.library = state.library; if (edited) this.library[index] = edited;
+          this.functions = state.functions || []; this.stride = state.stride;
+          this.setError(null); this.renderLibrary(); this.renderProperties();
+          this.onPreviewChange?.();
+          this.$('shader-status').textContent = t('적용됨'); ok = true;
+        } catch (error) { this.setError(error.message); this.$('shader-status').textContent = t('컴파일 오류'); ok = false; }
+      } while (this.pendingApply);
+      return ok;
+    })().finally(() => { this.applying = false; this.applyTask = null; });
+    return this.applyTask;
   }
 }

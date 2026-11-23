@@ -10,6 +10,16 @@ PMX(MMD) 모델을 미리 보고 **FBX / USD로 변환**하는 데스크톱 앱�
 
 [배포 파일 다운로드](https://github.com/mazelines/MMD-Canvas/releases) · [CI 실행 결과](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [릴리스 가이드](docs/releases.md)
 
+## v0.10.0: 셰이더 스태킹 고도화
+
+커스텀 HLSL 함수를 추가하고 실행 순서를 바꾸며, **구체 프리뷰와 캐릭터에서 결과를 바로 확인**할 수 있습니다. 함수는 화면의 **위에서 아래로** 번호 순서대로 실행됩니다. 드래그로 순서를 바꾸고, 체크박스로 개별 함수를 켜거나 끕니다.
+
+**`.shader`**는 함수 조합과 실행 순서를, **`.shaderStack`**은 개별 함수의 코드와 프로퍼티 기본값을 저장합니다. 저장한 함수는 여러 셰이더에서 재사용하고, 머티리얼별 프로퍼티 값은 독립적으로 조절할 수 있습니다.
+
+[![커스텀 셰이더 함수 편집과 스태킹 결과를 구체·캐릭터에서 확인하는 시연](docs/images/shader-stacking-preview.jpg)](docs/videos/shader-stacking-demo.mp4)
+
+[▶ 셰이더 스태킹 고도화 시연 보기 (MP4 · 2분 56초)](docs/videos/shader-stacking-demo.mp4) · [함수 추가·저장·재사용 방법](docs/shader-stack.md)
+
 ## v0.9.1: 메시 단위 선택 외곽선
 
 뷰포트 선택을 **개별 메시 단위**로 세분화했습니다. 이제 메시를 클릭하면 로드된 오브젝트 전체가 아니라 **해당 메시 둘레에만** 옅은 오렌지색 바깥쪽 실루엣 링이 표시됩니다. 인스펙터에서 머티리얼 행을 선택해도 같은 메시가 선택이자 편집 대상으로 동기화됩니다. 빈 곳 클릭/Esc는 선택을 해제합니다.

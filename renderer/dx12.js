@@ -152,6 +152,14 @@ export class Dx12Viewport {
     return this.starting;
   }
   get object() { return this.viewer.current?.object || this.empty; }
+  get library() { return this._library; }
+  set library(value) {
+    this._library = value || [];
+    // New function layouts/defaults need an upload even when instance overrides
+    // and the assigned shader ID stay unchanged. The revision also survives an
+    // older in-flight parameter upload completing after this assignment.
+    this.parameterRevision = (this.parameterRevision || 0) + 1;
+  }
   sceneKey(pose = false) {
     const v=this.viewer, values=[this.object.uuid]; if(pose)values.push(v.nativeRevision || 0);
     else values.push(JSON.stringify(this.materialAssign || []));
@@ -256,7 +264,7 @@ export class Dx12Viewport {
         const poseKey=this.sceneKey(true);
         if(key!==this.loadedKey) { this.pickState=null; this.viewer.invalidatePick(); const stackIds=[],panelIndices=[]; await window.api.dx12Model(nativeModel(this.object,false,this.materialAssign,stackIds,panelIndices)); await window.api.dx12MaterialStacks(stackIds); this.panelIndices=panelIndices; this.loadedKey=key;this.loadedPoseKey=poseKey;this.loadedParamKey=''; }
         else if(poseKey!==this.loadedPoseKey) { await window.api.dx12Pose(nativeModel(this.object,true));this.loadedPoseKey=poseKey; }
-        const paramKey=JSON.stringify(this.instances);
+        const paramKey=JSON.stringify([this.parameterRevision,this.instances]);
         if(paramKey!==this.loadedParamKey && this.panelIndices.length) { const pd=packMaterialParams(this.library,this.instances,this.panelIndices,this.stride,this.panelIndices.length); await window.api.dx12Params(pd.buffer); this.loadedParamKey=paramKey; }
         const result=await window.api.dx12Render(this.frame());
         this.lastFrame=result;

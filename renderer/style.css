@@ -246,9 +246,13 @@ aside { background: var(--panel); min-height: 0; display: flex; flex-direction: 
 
 /* ---------- shader stack editor ---------- */
 #shader-stack { list-style: none; margin: 0 0 6px; padding: 0; max-height: 200px; overflow-y: auto; }
-#shader-stack li { display: flex; align-items: center; gap: 4px; padding: 3px 4px; border-radius: 5px; }
+#shader-stack .shader-layer-row { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 5px; }
 #shader-stack li.active { background: #2d4668; }
 #shader-stack li input[type="checkbox"] { accent-color: var(--accent); margin: 0; }
+.shader-execution-direction { color: var(--accent); font-size: 11px; margin: 8px 0 2px; }
+.shader-execution-number { flex: 0 0 22px; height: 22px; line-height: 22px; text-align: center; font: 11px/22px Consolas, monospace; color: var(--accent); background: #233044; border-radius: 4px; }
+#shader-stack .disabled .shader-execution-number { color: var(--muted); background: transparent; }
+#shader-stack .disabled .shader-select { color: var(--muted); }
 #shader-stack .shader-select { flex: 1; text-align: left; background: transparent; border: 1px solid transparent; color: var(--text); padding: 2px 6px; border-radius: 4px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: Consolas, monospace; font-size: 12px; }
 #shader-stack li.active .shader-select { color: #dcecff; }
 #shader-stack .link { padding: 0 4px; font-size: 12px; }
@@ -277,6 +281,9 @@ body.shader-window { overflow: hidden; user-select: none; }
 .shader-preview-host #renderer-error { position: absolute; z-index: 12; top: 40%; left: 10%; right: 10%; padding: 18px; background: #242730; border: 1px solid #ba6666; border-radius: 8px; }
 .shader-code-panel { flex: none; height: 300px; display: flex; flex-direction: column; padding: 8px 10px; border-top: 1px solid var(--line); overflow: hidden; }
 .shader-code-panel h2 { margin: 0 0 6px; }
+.shader-asset-field { display: grid; grid-template-columns: 100px minmax(0,1fr); align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+.shader-asset-field input { min-width: 0; width: 100%; background: #12141a; color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 4px; }
+#shader-function-source { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; }
 .shader-code-panel #shader-editor-host { flex: 1; min-height: 0; user-select: text; }
 .shader-code-panel #shader-editor-host .CodeMirror { height: 100%; }
 .shader-right { overflow-y: auto; }
@@ -290,13 +297,13 @@ body.shader-window { overflow: hidden; user-select: none; }
 #shader-library .shader-select { flex: 1; text-align: left; background: transparent; border: 1px solid transparent; color: var(--text); padding: 2px 6px; border-radius: 4px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 #shader-library li.active .shader-select { color: #dcecff; }
 #shader-library .link { padding: 0 4px; font-size: 12px; }
-#shader-stack li { cursor: grab; }
+#shader-stack .shader-layer-row { cursor: grab; }
 #shader-stack li.dragging { opacity: .5; }
 #shader-stack li.drop-above { box-shadow: 0 -2px 0 var(--accent); }
 #shader-stack li.drop-below { box-shadow: 0 2px 0 var(--accent); }
 .shader-insert { display: block; width: 100%; height: 14px; line-height: 12px; margin: 1px 0; padding: 0; background: transparent; border: 1px dashed transparent; border-radius: 4px; color: var(--muted); font-size: 12px; cursor: pointer; opacity: .5; }
 .shader-insert:hover { opacity: 1; border-color: var(--accent); color: var(--accent); background: #1c2330; }
-.shader-popup { position: fixed; z-index: 100; min-width: 160px; background: #242730f5; border: 1px solid #454e5e; border-radius: 7px; box-shadow: 0 3px 12px #0005; padding: 4px; }
+.shader-popup { position: fixed; z-index: 100; min-width: 160px; max-height: calc(100vh - 16px); overflow-y: auto; background: #242730f5; border: 1px solid #454e5e; border-radius: 7px; box-shadow: 0 3px 12px #0005; padding: 4px; }
 .shader-popup-title { font-size: 10px; color: var(--muted); padding: 3px 8px; text-transform: uppercase; }
 .shader-popup-item { display: block; width: 100%; text-align: left; background: transparent; border: none; color: var(--text); padding: 5px 8px; border-radius: 4px; cursor: pointer; font-family: Consolas, monospace; font-size: 12px; }
 .shader-popup-item:hover { background: #2d4668; }

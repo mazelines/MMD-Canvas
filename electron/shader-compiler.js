@@ -25,11 +25,14 @@ const RUN_STACK = 'void runUserStack(inout ShadingContext ctx) { }';
 export function generateStackSource(baseSource, layers, stride = 1) {
   const { layers: parsed } = parseStack(layers, 0);
   // Inject each active layer's property declarations (reading per-material
-  // userParams slots: materialId*stride + localSlot), then call layers in order.
+  // userParams slots: materialId*stride + localSlot), then call layers in array
+  // order: the editor's top row runs first, the bottom row last. Skip disabled rows.
+  for (const [i, layer] of parsed.entries()) if (layer.enabled && layer.errors.length)
+    throw new Error(`${layers[i].ref || layers[i].name || layer.id}: ${layer.errors.join('\n')}`);
   const functions = parsed
-    .map((l, i) => (l.enabled && l.name ? injectDeclarations(layers[i].code, l, stride) : null))
+    .map((l, i) => (l.enabled && l.name ? `namespace MmdLayer_${i} {\n${injectDeclarations(layers[i].code, l, stride)}\n}` : null))
     .filter(Boolean).join('\n\n');
-  const calls = parsed.filter(l => l.enabled && l.name).map(l => `    ${l.name}(ctx);`).join('\n');
+  const calls = parsed.map((l, i) => l.enabled && l.name ? `    MmdLayer_${i}::${l.name}(ctx);` : '').filter(Boolean).join('\n');
   const body = `void runUserStack(inout ShadingContext ctx) {\n${calls}\n}`;
   const decl = 'StructuredBuffer<float4> userParams : register(t149);\n\n';
   if (!baseSource.includes(RUN_STACK)) throw new Error('viewport.hlsl에 runUserStack 삽입 지점이 없습니다.');
