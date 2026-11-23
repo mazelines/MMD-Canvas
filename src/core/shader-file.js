@@ -3,15 +3,15 @@
 // directory beside the `.canvas`); the workspace stores relative-path REFERENCES to
 // them plus per-material instance values, not the shader code itself.
 //
-// Layer shape mirrors the editor's stack layers ({id,name,code,enabled}); property
-// DEFAULTS live in the code's //@property annotations. Per-material instance values
-// are stored in the workspace, not here.
+// v2 layers contain {id,ref,enabled}; code/defaults live in separate .shaderStack
+// functions. v1 embedded layers are readable for migration on save. Per-material
+// instance values remain in the workspace, keyed by the stable layer IDs.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 export const SHADER_FORMAT = 'mmd-canvas-shader';
-export const SHADER_VERSION = 1;
+export const SHADER_VERSION = 2;
 const MAX_BYTES = 1024 * 1024;
 const MAX_LAYERS = 64;
 
@@ -20,12 +20,14 @@ const object = (v, field) => v && typeof v === 'object' && !Array.isArray(v) ? v
 const string = (v, field, max = 32768) => typeof v === 'string' && v.length <= max && !v.includes('\0') ? v : fail(field);
 const bool = (v, field) => typeof v === 'boolean' ? v : fail(field);
 
-const layer = (item, field) => {
+const layer = (item, field, version) => {
   const l = object(item, `${field}.layer`);
   return {
     id: string(l.id, `${field}.id`, 64),
-    name: string(l.name, `${field}.name`, 128),
-    code: string(l.code, `${field}.code`, 32768),
+    ...(version === 1 ? {
+      name: string(l.name, `${field}.name`, 128),
+      code: string(l.code, `${field}.code`, 32768),
+    } : { ref: string(l.ref, `${field}.ref`, 32768) }),
     enabled: l.enabled === undefined ? true : bool(l.enabled, `${field}.enabled`),
   };
 };
@@ -44,15 +46,18 @@ const metadata = (v, field) => {
 export function validateShaderFile(data) {
   const d = object(data, 'shader');
   if (d.format !== SHADER_FORMAT) fail('format');
-  if (d.version !== SHADER_VERSION) fail('version');
+  if (d.version !== 1 && d.version !== SHADER_VERSION) fail('version');
   if (!Array.isArray(d.layers)) fail('layers');
+  if (d.layers.length > MAX_LAYERS) fail('layers.length');
+  const layers = d.layers.map((l, i) => layer(l, `layers[${i}]`, d.version));
+  if (layers.some(l => !l.id) || new Set(layers.map(l => l.id)).size !== layers.length) fail('layers.id');
+  if (d.version === 2 && layers.some(l => !/\.shaderstack$/i.test(l.ref))) fail('layers.ref');
   return {
-    format: SHADER_FORMAT,
-    version: SHADER_VERSION,
+    format: SHADER_FORMAT, version: d.version,
     name: string(d.name, 'name', 128),
     outline: d.outline === undefined ? false : bool(d.outline, 'outline'),
     metadata: metadata(d.metadata, 'metadata'),
-    layers: d.layers.slice(0, MAX_LAYERS).map((l, i) => layer(l, `layers[${i}]`)),
+    layers,
   };
 }
 
@@ -60,7 +65,7 @@ export async function readShaderFile(filePath) {
   if (path.extname(filePath).toLowerCase() !== '.shader') fail('extension');
   const stat = await fs.stat(filePath);
   if (stat.size > MAX_BYTES) fail('size');
-  const raw = (await fs.readFile(filePath, 'utf8')).replace(/^/, '');
+  const raw = (await fs.readFile(filePath, 'utf8')).replace(/^\uFEFF/, '');
   return validateShaderFile(JSON.parse(raw));
 }
 
@@ -83,6 +88,6 @@ export function shaderContainer(entry) {
     format: SHADER_FORMAT, version: SHADER_VERSION,
     name: entry.name, outline: !!entry.outline,
     metadata: entry.metadata || { tags: [] },
-    layers: (entry.layers || []).map(l => ({ id: l.id, name: l.name, code: l.code, enabled: l.enabled !== false })),
+    layers: (entry.layers || []).map(l => ({ id: l.id, ref: l.ref, enabled: l.enabled !== false })),
   };
 }

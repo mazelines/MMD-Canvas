@@ -10,6 +10,16 @@ A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
 
+## v0.10.0: Shader stacking improvements
+
+Add custom HLSL functions, change their execution order, and **see the result immediately on the preview sphere and character**. Functions run **from top to bottom** in numbered order. Drag to reorder them or use the checkboxes to enable or skip individual functions.
+
+**`.shader`** stores the function composition and execution order; **`.shaderStack`** stores each function's code and property defaults. Saved functions can be reused across shaders, while property values remain independently adjustable for each material.
+
+[![Editing custom shader functions and previewing the stack on a sphere and character](images/shader-stacking-preview.jpg)](videos/shader-stacking-demo.mp4)
+
+[▶ Watch the shader stacking demo (MP4 · 2 min 56 sec)](videos/shader-stacking-demo.mp4) · [Adding, saving, and reusing functions (Korean)](shader-stack.md)
+
 ## v0.9.1: Per-mesh selection outline
 
 Viewport selection is now **per mesh**. Clicking a mesh draws the light-orange outer silhouette ring **around that mesh only**, instead of the whole loaded object. Selecting a material row in the inspector selects and outlines the same mesh (also the edit target). Clicking empty space or Esc deselects.

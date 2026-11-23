@@ -13,6 +13,7 @@ setLanguage(startup.locale);
 translateStatic(document.body);
 
 const viewer = new Viewer(document.getElementById('shader-preview-host'));
+window.__shaderPreview = viewer; // integration checks share the main viewport's inspection pattern
 viewer.flags.grid = false;
 viewer.grid.visible = false;
 viewer.setLightGizmo(false);
@@ -39,18 +40,20 @@ void viewer.dx12.start();
 
 const panel = new ShaderStackPanel();
 window.__shaderPanel = panel;
-let currentState = await api.shaderStackLibraryGet();
-panel.setState(currentState);
+panel.setState(await api.shaderStackLibraryGet());
 function syncPreview() {
   // The sphere previews the SELECTED library shader with preview-only values
   // (code defaults unless tweaked). No model material is involved.
   const stackId = panel.selectedStack || 0;
-  viewer.dx12.library = currentState.library || [];
-  viewer.dx12.stride = currentState.stride || 1;
+  // Direct mutation replies and IPC broadcasts feed the same committed state.
+  // Local, uncompiled editor drafts must not change GPU parameter layouts.
+  const state = panel.committedState || {};
+  viewer.dx12.library = state.library || [];
+  viewer.dx12.stride = state.stride || 1;
   viewer.dx12.instances = [{ stackId, params: panel.previewValues || {} }];
   viewer.dx12.materialAssign = [stackId];
   viewer.requestRender();
 }
 panel.onPreviewChange = () => syncPreview();
-api.onShaderStackUpdated(state => { currentState = state; panel.setState(state); syncPreview(); });
+api.onShaderStackUpdated(state => panel.setState(state));
 syncPreview();

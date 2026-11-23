@@ -10,6 +10,16 @@
 
 [下载](https://github.com/mazelines/MMD-Canvas/releases) · [CI 结果](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [发布指南（韩语）](releases.md)
 
+## v0.10.0: 着色器堆栈功能增强
+
+添加自定义 HLSL 函数并调整执行顺序，即可**在预览球体和角色上实时查看结果**。函数按照编号**从上到下**执行。拖动可调整顺序，复选框可启用或跳过单个函数。
+
+**`.shader`** 保存函数组合和执行顺序，**`.shaderStack`** 保存单个函数的代码和属性默认值。已保存的函数可在多个着色器中复用，各材质的属性值仍可独立调整。
+
+[![编辑自定义着色器函数，并在球体和角色上预览堆栈效果](images/shader-stacking-preview.jpg)](videos/shader-stacking-demo.mp4)
+
+[▶ 观看着色器堆栈演示（MP4 · 2分56秒）](videos/shader-stacking-demo.mp4) · [函数的添加、保存与复用（韩语）](shader-stack.md)
+
 ## v0.9.1：逐网格选择轮廓
 
 视口选择细化为**单个网格**。点击网格时，浅橙色外侧剪影环**只围绕该网格**显示，而不是整个已加载对象。在检查器中选择材质行也会选中并勾勒同一网格（同时作为编辑对象）。点击空白处或按 Esc 取消选择。
