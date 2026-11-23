@@ -149,7 +149,7 @@ export class Dx12Host {
     return { id: result.id ?? 0, gen: result.gen ?? 0 };
   }
   async render(bytes) {
-    if (!(bytes instanceof ArrayBuffer) || bytes.byteLength !== 308) throw new Error('Invalid native frame packet');
+    if (!(bytes instanceof ArrayBuffer) || ![308,324].includes(bytes.byteLength)) throw new Error('Invalid native frame packet');
     // Backpressure: the native command loop must stay free to receive release
     // messages instead of allocating more surfaces or exiting on pool exhaustion.
     const owner = this.child;

@@ -10,6 +10,15 @@ A desktop app for previewing PMX (MMD) models and **converting them to FBX / USD
 
 [Downloads](https://github.com/mazelines/MMD-Canvas/releases) · [CI results](https://github.com/mazelines/MMD-Canvas/actions/workflows/ci.yml) · [Release guide (Korean)](releases.md)
 
+## v0.11.0: Gradient and emission function library
+
+Choose either `.shaderStack` function from **Shader editor → Add function**:
+
+- **VerticalTwoColorBlending** blends bottom and top colors across the whole model's **object-space local Y axis**. The top-color coverage slider gives a uniform linear gradient at 50%; 0%/100% gives a solid bottom/top color. The gradient follows translation, rotation, and nonuniform scale.
+- **SelfEmission** adds a separate **emission mask texture**, intensity in nits, and emission color. Enable `Use diffuse color` for **emission + diffuse color**, or disable it for **emission + the selected emission color**. The mask uses its red channel; no mask means full emission, while a missing image blocks emission.
+
+Each material keeps independent mask and property values, restored when reopening its `.canvas` workspace. Place **SelfEmission below the gradient** to add emission to its result; functions execute from top to bottom. [Usage (Korean)](shader-stack.md#함수-라이브러리) · [0.11.0 release notes](release-notes/v0.11.0.md).
+
 ## v0.10.0: Shader stacking improvements
 
 Add custom HLSL functions, change their execution order, and **see the result immediately on the preview sphere and character**. Functions run **from top to bottom** in numbered order. Drag to reorder them or use the checkboxes to enable or skip individual functions.

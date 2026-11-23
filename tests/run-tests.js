@@ -21,6 +21,7 @@ import { registerWorkspaceTests } from './workspace-tests.js';
 import { registerAnimationTests } from './animation-tests.js';
 import { registerNativeRendererTests } from './native-renderer-tests.js';
 import { registerShaderStackTests } from './shader-stack-tests.js';
+import { registerShaderLibraryTests } from './shader-library-tests.js';
 import { registerShaderFileTests } from './shader-file-tests.js';
 import { registerUpdateTests } from './update-tests.js';
 
@@ -39,6 +40,7 @@ function test(name, fn) {
   });
 }
 registerNativeRendererTests(test);
+registerShaderLibraryTests(test);
 registerUpdateTests(test);
 
 /** Minimal binary FBX reader: validates node framing and returns the node tree. */

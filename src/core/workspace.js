@@ -85,6 +85,8 @@ export function validateWorkspace(value) {
           for (const [key, val] of Object.entries(lv).slice(0, 256)) {
             if (typeof val === 'number' && Number.isFinite(val)) clean[key] = val;
             else if (Array.isArray(val) && val.length <= 4 && val.every((n) => typeof n === 'number' && Number.isFinite(n))) clean[key] = val;
+            else if (val && typeof val === 'object' && !Array.isArray(val) && 'texture' in val)
+              clean[key] = { texture: nullablePath(val.texture, 'materialInstances.params.texture') };
           }
           params[layerId] = clean;
         }
@@ -128,7 +130,11 @@ function mapPaths(data, fn) {
   if (data.conversion.source) data.conversion.source = fn(data.conversion.source);
   // .shader references are relative paths too (builtin:<name> refs are not paths).
   const mapRef = (ref) => (typeof ref === 'string' && !ref.startsWith('builtin:')) ? fn(ref) : ref;
-  if (Array.isArray(data.viewport?.materialInstances)) for (const inst of data.viewport.materialInstances) inst.ref = mapRef(inst.ref);
+  if (Array.isArray(data.viewport?.materialInstances)) for (const inst of data.viewport.materialInstances) {
+    inst.ref = mapRef(inst.ref);
+    for (const values of Object.values(inst.params || {})) for (const value of Object.values(values))
+      if (value?.texture) value.texture = fn(value.texture);
+  }
   if (Array.isArray(data.viewport?.shaderFiles)) data.viewport.shaderFiles = data.viewport.shaderFiles.map(mapRef);
   return data;
 }
@@ -154,7 +160,11 @@ export function networkPaths(data, filePath = '') {
   const host = (p) => /^[\\/]{2}([^\\/]+)/.exec(p)?.[1].toLowerCase() || null;
   const own = host(filePath);
   const paths = [data.browser.directory, data.model?.path, data.conversion.output, data.conversion.source];
-  for (const inst of data.viewport?.materialInstances || []) if (typeof inst.ref === 'string' && !inst.ref.startsWith('builtin:')) paths.push(inst.ref);
+  for (const inst of data.viewport?.materialInstances || []) {
+    if (typeof inst.ref === 'string' && !inst.ref.startsWith('builtin:')) paths.push(inst.ref);
+    for (const values of Object.values(inst.params || {})) for (const value of Object.values(values))
+      if (value?.texture) paths.push(value.texture);
+  }
   for (const p of data.viewport?.shaderFiles || []) paths.push(p);
   return [...new Set(paths.filter((p) => typeof p === 'string' && host(p) && host(p) !== own))];
 }

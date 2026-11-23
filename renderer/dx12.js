@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { gt7InverseDisplay } from './gt7-tonemapping.js';
 import { nativeTexture } from './native-textures.js';
 import { collectMaterials } from './material-info.js';
-import { packMaterialParams } from '../src/core/shader-stack.js';
+import { packMaterialParams, shaderTexturePaths } from '../src/core/shader-stack.js';
+import { measureObjectHeight, objectHeightPlane } from './object-space-height.js';
+import { ShaderTextures } from './shader-textures.js';
 
 function bytes(array) { return new Uint8Array(array.buffer, array.byteOffset, array.byteLength); }
 function join(parts) {
@@ -13,7 +15,7 @@ function join(parts) {
 // materialAssign (panel material index -> stackId) + stackIdsOut (filled parallel
 // to native material records) enable per-material shader stacks. Default callers
 // pass neither and get the plain model packet as before.
-export function nativeModel(object, poseOnly = false, materialAssign = null, stackIdsOut = null, panelIndicesOut = null) {
+export function nativeModel(object, poseOnly = false, materialAssign = null, stackIdsOut = null, panelIndicesOut = null, shaderTextures = new Map(), shaderTextureIds = new Map()) {
   object.updateMatrixWorld(true);
   const vertices = [], triangles = [], records = [], textures = [], materialIds = new Map(), textureIds = new Map();
   const textureId = texture => {
@@ -95,6 +97,10 @@ export function nativeModel(object, poseOnly = false, materialAssign = null, sta
     if (!vertices.length) vertices.push(0,0,0,0,1,0,0,0);
     triangles.push(0,0,0,materialId(new THREE.MeshLambertMaterial({opacity:0,transparent:true}), 0));
   }
+  shaderTextureIds.clear();
+  for (const [path, entry] of shaderTextures) shaderTextureIds.set(path, {
+    index: entry.texture ? textureId(entry.texture) : -2, flipY: entry.texture?.flipY,
+  });
   const parts = [new Uint32Array([vertices.length/8,triangles.length/4,records.length,textures.length]), new Float32Array(vertices),new Uint32Array(triangles),...records];
   for (const t of textures) {
     parts.push(new Uint32Array([t.width,t.height,t.srgb?1:0,t.encoding,t.mips.length]));
@@ -109,6 +115,7 @@ export class Dx12Viewport {
     this.materialAssign = []; // panel material index -> shader stackId (synced from main)
     this.library = []; this.instances = []; this.stride = 1; // per-material shader state (synced from main)
     this.panelIndices = []; this.loadedParamKey = '';
+    this.shaderTextures = new ShaderTextures(); this.shaderTextureIds = new Map();
     this.selectionPanel = -1; // selected mesh (panel index), -1 = none; per-mesh outline
     // Published pick state: native generation + panelIndices snapshot of the last VALID
     // render, updated atomically. Null while a model/mapping rebuild is in flight.
@@ -177,7 +184,7 @@ export class Dx12Viewport {
     });return values.join('|');
   }
   frame() {
-    const v=this.viewer, out=new ArrayBuffer(308), u=new Uint32Array(out), f=new Float32Array(out,4); u[0]=++this.id;
+    const v=this.viewer, out=new ArrayBuffer(324), u=new Uint32Array(out), f=new Float32Array(out,4); u[0]=++this.id;
     v.camera.updateMatrixWorld();
     f.set(v.camera.matrixWorldInverse.elements,0);
     const projection = v.camera.projectionMatrix.clone();
@@ -204,6 +211,10 @@ export class Dx12Viewport {
     // region; no per-frame color slots needed.
     const selNative=this.selectionPanel>=0?this.panelIndices.indexOf(this.selectionPanel):-1;
     f[73]=selNative>=0?selNative+1:0;
+    if (this.heightObject !== this.object) {
+      this.heightObject = this.object; this.heightBounds = measureObjectHeight(this.object);
+    }
+    f.set(objectHeightPlane(this.object, this.heightBounds), 76);
     return out;
   }
   setSelection(panelIndex) { this.selectionPanel = panelIndex >= 0 ? panelIndex : -1; this.viewer.requestRender(); }
@@ -260,12 +271,18 @@ export class Dx12Viewport {
     try {
       while(this.enabled && this.dirty) {
         this.dirty=false;this.canvas.hidden=false; this.object.updateMatrixWorld(true);
-        const key=this.sceneKey();
+        const textureState=JSON.stringify([this.parameterRevision,this.instances]), object=this.object;
+        if(textureState!==this.preparedTextureState) {
+          await this.shaderTextures.prepare(shaderTexturePaths(this.library,this.instances),this.parameterRevision);
+          this.preparedTextureState=textureState;
+        }
+        if(object!==this.object || textureState!==JSON.stringify([this.parameterRevision,this.instances])) { this.dirty=true; continue; }
+        const key=this.sceneKey()+'|'+JSON.stringify(this.shaderTextures.key);
         const poseKey=this.sceneKey(true);
-        if(key!==this.loadedKey) { this.pickState=null; this.viewer.invalidatePick(); const stackIds=[],panelIndices=[]; await window.api.dx12Model(nativeModel(this.object,false,this.materialAssign,stackIds,panelIndices)); await window.api.dx12MaterialStacks(stackIds); this.panelIndices=panelIndices; this.loadedKey=key;this.loadedPoseKey=poseKey;this.loadedParamKey=''; }
+        if(key!==this.loadedKey) { this.pickState=null; this.viewer.invalidatePick(); const stackIds=[],panelIndices=[]; await window.api.dx12Model(nativeModel(this.object,false,this.materialAssign,stackIds,panelIndices,this.shaderTextures.entries,this.shaderTextureIds)); await window.api.dx12MaterialStacks(stackIds); this.panelIndices=panelIndices; this.loadedKey=key;this.loadedPoseKey=poseKey;this.loadedParamKey=''; }
         else if(poseKey!==this.loadedPoseKey) { await window.api.dx12Pose(nativeModel(this.object,true));this.loadedPoseKey=poseKey; }
         const paramKey=JSON.stringify([this.parameterRevision,this.instances]);
-        if(paramKey!==this.loadedParamKey && this.panelIndices.length) { const pd=packMaterialParams(this.library,this.instances,this.panelIndices,this.stride,this.panelIndices.length); await window.api.dx12Params(pd.buffer); this.loadedParamKey=paramKey; }
+        if(paramKey!==this.loadedParamKey && this.panelIndices.length) { const pd=packMaterialParams(this.library,this.instances,this.panelIndices,this.stride,this.panelIndices.length,this.shaderTextureIds); await window.api.dx12Params(pd.buffer); this.loadedParamKey=paramKey; }
         const result=await window.api.dx12Render(this.frame());
         this.lastFrame=result;
         // Publish a new pick snapshot only when the model/mapping generation changes;
@@ -274,6 +291,7 @@ export class Dx12Viewport {
         if(!this.pickState||this.pickState.gen!==result.modelGen||this.pickState.panelIndices!==this.panelIndices)
           this.pickState={gen:result.modelGen,panelIndices:this.panelIndices};
         this.status.textContent=`DX12 Ultimate · ${result.antialiasing||'MSAA 4x'} · ${result.renderMs.toFixed(1)} ms`;
+        if(this.shaderTextures.errors.length) this.status.textContent += ' · '+this.shaderTextures.errors.join(' · ');
         // Finish temporal convergence even when the camera/model becomes still.
         // Presentation acknowledgement already paces frames and bounds GPU leases.
         if(result.shadowAccumulating||result.aaAccumulating)this.dirty=true;

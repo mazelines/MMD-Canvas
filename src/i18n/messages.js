@@ -1,5 +1,18 @@
 // Source Korean text -> English, Simplified Chinese, Japanese.
 export const messages = {
+  '상단 색상': ['Top color', '顶部颜色', '上部の色'],
+  '하단 색상': ['Bottom color', '底部颜色', '下部の色'],
+  '상단 색 점유율 (%)': ['Top color coverage (%)', '顶部颜色占比 (%)', '上部の色の割合 (%)'],
+  '혼합 강도': ['Blend strength', '混合强度', 'ブレンド強度'],
+  '발광 마스크': ['Emission mask', '自发光遮罩', '発光マスク'],
+  '디퓨즈 색상 사용 (끄면 발광 색상)': ['Use diffuse color (off: emission color)', '使用漫反射颜色（关闭：发光颜色）', '拡散色を使用（オフ：発光色）'],
+  '발광 색상': ['Emission color', '发光颜色', '発光色'],
+  '발광 강도 (nit)': ['Emission (nit)', '发光强度 (nit)', '発光強度 (nit)'],
+  '텍스처 선택…': ['Choose texture…', '选择纹理…', 'テクスチャを選択…'],
+  '미지정: 전체 발광': ['Unassigned: emit everywhere', '未指定：全部发光', '未指定：全面が発光'],
+  '텍스처 해제': ['Clear texture', '清除纹理', 'テクスチャを解除'],
+  '텍스처 선택 실패': ['Texture selection failed', '纹理选择失败', 'テクスチャの選択に失敗'],
+  '마스크 텍스처를 읽을 수 없습니다: {0} (발광 차단)': ['Cannot read mask texture: {0} (emission blocked)', '无法读取遮罩纹理：{0}（已禁用发光）', 'マスクを読み込めません：{0}（発光を停止）'],
   'MMD Canvas {0} 버전을 사용할 수 있습니다.': ['MMD Canvas {0} is available.', 'MMD Canvas {0} 已可下载。', 'MMD Canvas {0} が利用できます。'],
   '다운로드': ['Download', '下载', 'ダウンロード'],
   '이 버전 알림 닫기': ['Dismiss this version', '不再提示此版本', 'このバージョンの通知を閉じる'],

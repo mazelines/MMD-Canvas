@@ -12,6 +12,8 @@ struct ShadingContext {
     float3 geoNormal;    // geometric normal
     float3 bentNormal;   // lighting normal plus world-space AO bend; normal when AO is off
     float2 uv;
+    float2 rawUV;        // mesh UV, independent of the diffuse map transform
+    float objectHeight; // model-local Y normalized to reference bounds [0,1]
     float3 viewDir;      // normalized surface -> camera
     float  depth;        // view-space depth (-view.z)
     float2 pixel;        // SV_Position.xy (render pixels)
@@ -57,4 +59,14 @@ float3 evaluateAmbient(float3 direction, float skyBlend) {
 float sampleSceneDepth(float2 pixel) {
     int2 p = clamp(int2(pixel), int2(0, 0), int2(viewport.xy) - 1);
     return normalDepth.Load(int3(p, 0)).w;
+}
+
+// texture2D properties pack the image index and its Y orientation. Unassigned
+// masks are white; missing files are black. Masks always use linear data views.
+float4 sampleShaderTexture(float2 textureHandle, float2 uv) {
+    int id = (int)textureHandle.x;
+    if (id < -1) return 0;
+    if (id < 0) return 1;
+    if (textureHandle.y > 0.5) uv.y = 1 - uv.y;
+    return images[NonUniformResourceIndex(id)].SampleBias(linearWrap, uv, aaInfo.w);
 }

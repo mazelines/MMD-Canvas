@@ -15,8 +15,28 @@ const node = (tag, props = {}, ...children) => {
 // value = current value; commit(v) persists a change. Returns a label row.
 export function buildPropertyControl(prop, value, commit) {
   const row = node('label', { className: 'shader-prop-row', title: t(prop.label) });
+  row.dataset.property = prop.name;
   row.append(node('span', { textContent: t(prop.label) }));
-  if (prop.type === 'bool') {
+  if (prop.type === 'texture2D') {
+    const controls = node('span', { className: 'shader-texture-control' });
+    const path = value?.texture;
+    const choose = node('button', { type: 'button', textContent: path ? path.split(/[\\/]/).pop() : t('텍스처 선택…'), title: path || t('미지정: 전체 발광') });
+    const clear = node('button', { type: 'button', textContent: '×', title: t('텍스처 해제'), disabled: !path });
+    const update = selected => {
+      choose.textContent = selected ? selected.split(/[\\/]/).pop() : t('텍스처 선택…');
+      choose.title = selected || t('미지정: 전체 발광'); clear.disabled = !selected;
+    };
+    choose.addEventListener('click', async event => {
+      event.preventDefault();
+      try {
+        const selected = await window.api.shaderTextureOpen();
+        if (selected) { await commit({ texture: selected }); update(selected); }
+      } catch (error) { choose.title = error.message; choose.textContent = t('텍스처 선택 실패'); }
+    });
+    clear.addEventListener('click', event => { event.preventDefault(); commit({ texture: null }); update(null); });
+    controls.append(choose, clear); row.append(controls);
+  } else if (prop.type === 'bool') {
+    row.classList.add('shader-prop-bool');
     const input = node('input', { type: 'checkbox', checked: !!value });
     input.addEventListener('change', () => commit(input.checked ? 1 : 0));
     row.append(input);

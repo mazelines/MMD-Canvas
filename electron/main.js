@@ -230,6 +230,12 @@ let stackCache = new Map(); // stackId -> { color, aa }
 let stride = 1;             // per-material userParams stride (max stack slot count)
 let shaderDir = null;       // directory holding user .shader files (canvas/model dir + shaders/)
 let functionAssets = [], shaderAssetErrors = [];
+let builtinFunctions = [], builtinFunctionErrors = [];
+const builtinFunctionsReady = discoverFunctionAssets(path.join(ROOT, 'renderer', 'shader-functions')).then(result => {
+  // Insert editable copies; never link a project to a read-only app.asar asset.
+  builtinFunctions = result.assets.map(({ ref, ...asset }) => asset);
+  builtinFunctionErrors = result.errors;
+});
 let shaderEdits = Promise.resolve();
 const editShaders = fn => { const task = shaderEdits.then(fn); shaderEdits = task.catch(() => {}); return task; };
 function openShaderWindow() {
@@ -247,7 +253,7 @@ function shaderState() {
   for (const entry of shaderLibrary) for (const layer of entry.layers) if (layer.ref)
     catalog.set(layer.ref, { name: layer.name, code: layer.code, ref: layer.ref, metadata: layer.metadata });
   return { library: shaderLibrary, instances: materialInstances, materialNames, stride, previewShaderId,
-    functions: [...catalog.values()], assetErrors: shaderAssetErrors };
+    functions: [...catalog.values()], builtinFunctions, assetErrors: [...builtinFunctionErrors, ...shaderAssetErrors] };
 }
 function notifyShaderApplied() {
   // Direct render kick: reliable across the multi-window setup where the IPC
@@ -327,7 +333,13 @@ handleHost('dx12:stop', (host) => host.stop());
 // Shader stack editor window: main owns the state, compiles, hot-swap, and
 // notifies the main viewport to re-render. The host mutex serializes shader loads
 // against renders; parameter uploads are fire-and-forget.
-handle('shader-stack:library-get', () => shaderState());
+handle('shader-stack:library-get', async () => { await builtinFunctionsReady; return shaderState(); });
+handle('shader-texture:open', async () => {
+  const selected = await dialog.showOpenDialog(BrowserWindow.getFocusedWindow() || win, {
+    properties: ['openFile'], filters: [{ name: t('발광 마스크'), extensions: ['png', 'jpg', 'jpeg', 'bmp', 'webp'] }],
+  });
+  return selected.canceled ? null : selected.filePaths[0];
+});
 // Compile every library stack at the shared per-material stride, then fan out:
 // the main host gets the whole library (opcode 8, with outline flags); the preview
 // host gets the selected material's stack as its base shader (opcode 6). Per-material

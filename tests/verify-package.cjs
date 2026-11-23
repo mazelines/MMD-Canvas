@@ -9,6 +9,8 @@ function verifyPackage(archive, projectDir = path.resolve(__dirname, '..')) {
     'renderer/index.html', 'renderer/app.js', 'renderer/viewer.js', 'electron/update-checker.js',
     'renderer/shader-stack.html', 'renderer/shader-stack-window.js', 'renderer/shader-stack-panel.js',
     'src/core/shader-assets.js', 'src/core/shader-file.js', 'src/core/shader-stack.js', 'electron/shader-compiler.js',
+    'renderer/object-space-height.js', 'renderer/shader-textures.js',
+    'renderer/shader-functions/VerticalTwoColorBlending.shaderStack', 'renderer/shader-functions/SelfEmission.shaderStack',
     'renderer/cortao.js', 'electron/dx12.js', 'renderer/dx12.js', 'renderer/native-textures.js',
     'node_modules/three/build/three.core.js', 'src/core/ambient-occlusion.js', 'licenses/CORTAO-MIT.txt', 'licenses/NVIDIA-DLSS.txt', 'licenses/NVIDIA-NIS.txt', 'licenses/DXC-SDK.txt',
     'native/dx12/viewport.hlsl', 'native/dx12/shading-context.hlsl'];

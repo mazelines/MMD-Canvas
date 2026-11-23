@@ -63,6 +63,7 @@ contextBridge.exposeInMainWorld('api', {
   shaderStackSetDir: (baseDir) => call('shader-stack:set-dir', baseDir),
   shaderStackSaveEntry: (stackId, saveAs) => call('shader-stack:save-entry', { stackId, saveAs }),
   shaderFunctionOpen: () => call('shader-function:open'),
+  shaderTextureOpen: () => call('shader-texture:open'),
   shaderFunctionSave: (stackId, layerId, layer, saveAs = false) => call('shader-function:save', { stackId, layerId, layer, saveAs }),
   shaderStackDeleteEntry: (stackId) => call('shader-stack:delete-entry', { stackId }),
   shaderDirty: () => call('shader:dirty'),
