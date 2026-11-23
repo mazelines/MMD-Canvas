@@ -1,0 +1,10 @@
+{
+  "format": "mmd-canvas-shader-stack",
+  "version": 1,
+  "name": "SelfEmission",
+  "metadata": {
+    "description": "별도 선형 마스크(R 채널)로 자체발광을 더합니다. 토글 ON: 디퓨즈 색상, OFF: 지정 발광 색상. 마스크 미지정은 전체 발광이며 읽기 실패 시 발광을 차단합니다.",
+    "tags": ["emission", "mask", "color"]
+  },
+  "code": "//@property texture2D emissionMask = white \"발광 마스크\"\n//@property bool useDiffuseColor = true \"디퓨즈 색상 사용 (끄면 발광 색상)\"\n//@property color emissionColor = (1,1,1) \"발광 색상\"\n//@property float intensity = 100 [0,10000] \"발광 강도 (nit)\"\nvoid SelfEmission(inout ShadingContext ctx) {\n    float mask = saturate(sampleShaderTexture(emissionMask, ctx.rawUV).r);\n    float3 tint = useDiffuseColor ? ctx.albedo : emissionColor;\n    ctx.color += max(tint, 0) * max(intensity, 0) * mask;\n}"
+}

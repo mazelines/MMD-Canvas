@@ -22,6 +22,7 @@ cbuffer Frame : register(b0) {
     uint4 temporalInfo;      // sampling frame, valid history, max history, enabled
     float4 aaInfo;           // output width/height, DLSS active, material mip bias
     float4 aaJitter;         // current/previous sample offsets in render pixels
+    float4 objectHeightPlane; // world position -> normalized model-local Y
 };
 cbuffer Draw : register(b1) { uint materialId; uint mipLevel; uint triangleOffset; uint selected; };
 StructuredBuffer<Vertex> vertices : register(t0);
@@ -302,6 +303,7 @@ void baseShading(Varying v, bool front, uint primitive, inout ShadingContext ctx
     float3 emission = m.emission.rgb * (m.mapFlags.w>0?decodeSRGB(emissive):emissive);
     float3 lit = albedo * (direct * sun.w + fill * min(materialAO, screenAO)) / 3.141592653589793 + emission;
     ctx.worldPos = v.world; ctx.normal = n; ctx.geoNormal = n; ctx.bentNormal = bentNormal; ctx.uv = uv;
+    ctx.rawUV = v.uv; ctx.objectHeight = saturate(dot(float4(v.world, 1), objectHeightPlane));
     ctx.viewDir = normalize(-mul(transpose((float3x3)view),float3(view[0][3],view[1][3],view[2][3])) - v.world);
     ctx.depth = v.depth; ctx.pixel = v.position.xy; ctx.front = front ? 1.0 : -1.0;
     ctx.albedo = albedo; ctx.emission = emission; ctx.alpha = alpha; ctx.materialColor = m.color.rgb;

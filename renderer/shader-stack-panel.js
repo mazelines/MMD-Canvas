@@ -67,7 +67,7 @@ const makeLayer = (name, code) => ({ id: `layer-${crypto.randomUUID()}`, name, c
 export class ShaderStackPanel {
   constructor() {
     this.$ = id => document.getElementById(id);
-    this.library = []; this.stride = 1; this.functions = [];
+    this.library = []; this.stride = 1; this.functions = []; this.builtinFunctions = [];
     this.selectedStack = 1; this.previewValues = {}; this.onPreviewChange = null;
     this.selected = -1; this.editor = null; this.applying = false; this.dragIndex = -1; this.popup = null;
     this.$('shader-add').addEventListener('click', ev => this.openCatalog(this.stack.length, ev.currentTarget));
@@ -102,6 +102,7 @@ export class ShaderStackPanel {
     if (this.applying) { this.onPreviewChange?.(); return; } // keep local source while adopting committed preview data
     this.library = state.library || []; this.stride = state.stride || 1;
     this.functions = state.functions || [];
+    this.builtinFunctions = state.builtinFunctions || [];
     const errors = this.$('shader-assets-error');
     errors.textContent = (state.assetErrors || []).map(e => `${e.path}\n${e.message}`).join('\n\n');
     errors.hidden = !errors.textContent;
@@ -228,9 +229,9 @@ export class ShaderStackPanel {
     this.closePopup();
     const menu = node('div', { className: 'shader-popup', role: 'menu' });
     menu.append(node('div', { className: 'shader-popup-title', textContent: t('함수 삽입') }));
-    for (const example of [...SHADER_EXAMPLES, BLANK_TEMPLATE, ...this.functions]) {
+    for (const example of [...this.builtinFunctions, ...SHADER_EXAMPLES, BLANK_TEMPLATE, ...this.functions]) {
       const item = node('button', { className: 'shader-popup-item', textContent: example.name, role: 'menuitem' });
-      if (example.ref) item.title = example.ref;
+      item.title = example.ref || example.metadata?.description || '';
       item.addEventListener('click', () => this.insertLayer(index, example));
       menu.append(item);
     }
@@ -353,7 +354,7 @@ export class ShaderStackPanel {
           // Preserve newer local keystrokes while adopting shared-function updates.
           const edited = JSON.stringify(this.library[index]) !== snapshot ? this.library[index] : null;
           this.library = state.library; if (edited) this.library[index] = edited;
-          this.functions = state.functions || []; this.stride = state.stride;
+          this.functions = state.functions || []; this.builtinFunctions = state.builtinFunctions || []; this.stride = state.stride;
           this.setError(null); this.renderLibrary(); this.renderProperties();
           this.onPreviewChange?.();
           this.$('shader-status').textContent = t('적용됨'); ok = true;

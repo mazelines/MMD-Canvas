@@ -41,6 +41,7 @@ struct NativeRenderer {
     ComPtr<ID3D12Resource> previousVertexBuffer, motion, shadowRawTexture, shadowGuideTexture;
     std::array<ComPtr<ID3D12Resource>,2> surfaces, shadowHistories, shadowFilters;
     std::array<float,76> previousFrame{};
+    std::array<float,4> previousHeightPlane{};
     uint32_t shadowIndex=0, samplingFrame=0, stableFrames=0;
     bool historyValid=false, poseChanged=false;
     bool aaHistoryValid=false;
@@ -498,7 +499,11 @@ struct NativeRenderer {
     }
     static float halton(uint32_t index,uint32_t base){float result=0,f=1;while(index){f/=float(base);result+=f*(index%base);index/=base;}return result;}
     std::string render(const std::vector<uint8_t>& packet) {
+        if(packet.size()!=308 && packet.size()!=324)throw std::runtime_error("Invalid frame packet size");
         if(!hasModel)throw std::runtime_error("Load a model before rendering");Reader r{packet};uint32_t id=r.u32();float frame[76];memcpy(frame,r.take(sizeof(frame)),sizeof(frame));
+        float heightPlane[4]{0,0,0,0.5f};
+        if(packet.size()==324)memcpy(heightPlane,r.take(sizeof(heightPlane)),sizeof(heightPlane));
+        for(float f:heightPlane)if(!std::isfinite(f))throw std::runtime_error("Invalid object height plane");
         wireframe=frame[55]>0;outlines=frame[63]>0&&!wireframe;
         for(float f:frame)if(!std::isfinite(f))throw std::runtime_error("Invalid frame constants");
         frame[72]=std::clamp(frame[72],0.0f,1.0f);
@@ -514,7 +519,7 @@ struct NativeRenderer {
         // Sharpening (floats 72..75) is a pure post-process: deliberately outside
         // the appearance range so adjusting it never resets reconstruction history.
         bool appearanceChanged=std::memcmp(frame+32,previousFrame.data()+32,40*sizeof(float))!=0;
-        bool aaReset=!aaHistoryValid||modeChanged||appearanceChanged;
+        bool aaReset=!aaHistoryValid||modeChanged||appearanceChanged||std::memcmp(heightPlane,previousHeightPlane.data(),sizeof(heightPlane))!=0;
         bool invalidate=!historyValid;
         for(int i:{32,33,34,46,50,54,60})if(std::abs(frame[i]-previousFrame[i])>0.000001f)invalidate=true;
         for(int i=16;i<32;i++)if(std::abs(frame[i]-previousFrame[i])>0.0001f)invalidate=aaReset=true;
@@ -534,7 +539,7 @@ struct NativeRenderer {
         textureView(shadowHistories[1-shadowIndex].Get(),141);textureView(shadowHistories[shadowIndex].Get(),143);textureView(shadowHistories[shadowIndex].Get(),167,true);
         void* mapped=nullptr;check(constants->Map(0,nullptr,&mapped),"Map constants");memcpy(mapped,frame,sizeof(frame));memcpy((uint8_t*)mapped+sizeof(frame),mipInfo.data(),sizeof(mipInfo));
         memcpy((uint8_t*)mapped+432,previousFrame.data(),128);memcpy((uint8_t*)mapped+560,info,sizeof(info));
-        memcpy((uint8_t*)mapped+576,aaParams,sizeof(aaParams));memcpy((uint8_t*)mapped+592,jitter,sizeof(jitter));constants->Unmap(0,nullptr);
+        memcpy((uint8_t*)mapped+576,aaParams,sizeof(aaParams));memcpy((uint8_t*)mapped+592,jitter,sizeof(jitter));memcpy((uint8_t*)mapped+608,heightPlane,sizeof(heightPlane));constants->Unmap(0,nullptr);
         auto began=std::chrono::steady_clock::now();d.begin();
         for(auto* resource:{normal.Get(),surfaces[shadowIndex].Get(),motion.Get()})transition(resource,D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_RENDER_TARGET);
         draw(true);
@@ -579,7 +584,7 @@ struct NativeRenderer {
             transition(sharedOutput.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_COMMON);
         }
         d.submit();
-        historyValid=temporal;previousVertexBuffer=vertexBuffer;std::copy(std::begin(frame),std::end(frame),previousFrame.begin());poseChanged=false;shadowIndex=1-shadowIndex;
+        historyValid=temporal;previousVertexBuffer=vertexBuffer;std::copy(std::begin(frame),std::end(frame),previousFrame.begin());std::copy(std::begin(heightPlane),std::end(heightPlane),previousHeightPlane.begin());poseChanged=false;shadowIndex=1-shadowIndex;
         aaHistoryValid=aaActive;previousJitter[0]=jitter[0];previousJitter[1]=jitter[1];lastRender=began;
         if(temporal)stableFrames=std::min(stableFrames+1,32u);
         if(aaActive)aaStableFrames=std::min(aaStableFrames+1,32u);

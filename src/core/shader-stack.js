@@ -5,11 +5,11 @@
 //
 // Annotation grammar (one per line, above the function):
 //   //@property <type> <name> = <default> [min,max] "label"
-// type: float | float2 | float3 | float4 | int | bool | color
+// type: float | float2 | float3 | float4 | int | bool | color | texture2D
 // Each property occupies one float4 slot in the userParams structured buffer.
 
-export const PROPERTY_TYPES = ['float', 'float2', 'float3', 'float4', 'int', 'bool', 'color'];
-const TYPE_RE = /^\/\/@property\s+(float4|float3|float2|float|int|bool|color)\s+([A-Za-z_]\w*)\s*=\s*(.*)$/;
+export const PROPERTY_TYPES = ['float', 'float2', 'float3', 'float4', 'int', 'bool', 'color', 'texture2D'];
+const TYPE_RE = /^\/\/@property\s+(float4|float3|float2|float|int|bool|color|texture2D)\s+([A-Za-z_]\w*)\s*=\s*(.*)$/;
 const FUNC_RE = /void\s+([A-Za-z_]\w*)\s*\(\s*inout\s+ShadingContext\s+\w+\s*\)/;
 
 // Upgrade only the exact shipped Toon fill, including the older single-layer
@@ -49,6 +49,7 @@ function parseVector(str) {
 }
 export function parseDefault(type, str) {
   const s = str.trim();
+  if (type === 'texture2D') return { texture: null }; // white, no asset selected
   if (type === 'bool') return s === 'true' ? 1 : 0;
   if (type === 'int' || type === 'float') { const n = Number(s); return Number.isFinite(n) ? n : 0; }
   const v = parseVector(s);
@@ -102,10 +103,10 @@ export function parseStack(layers, baseSlot = 0) {
 }
 
 // Pack parameter values into float4 slots for the native buffer.
-// values: { [layerId]: { [propName]: number|number[] } }; falls back to defaults.
+// Values are numbers, vectors or {texture:path|null}; missing values use defaults.
 // baseSlot offsets this stack's slots; totalSlots sizes the (shared) buffer; out
 // optionally writes into an existing combined buffer instead of allocating.
-export function packParams(layers, values = {}, baseSlot = 0, totalSlots = null, out = null) {
+export function packParams(layers, values = {}, baseSlot = 0, totalSlots = null, out = null, textures = new Map()) {
   const { layers: parsed, slotCount } = parseStack(layers, baseSlot);
   const size = (totalSlots ?? (baseSlot + slotCount)) * 4;
   const data = out || new Float32Array(Math.max(1, size));
@@ -114,7 +115,8 @@ export function packParams(layers, values = {}, baseSlot = 0, totalSlots = null,
     for (const p of layer.properties) {
       const raw = layerValues[p.name] !== undefined ? layerValues[p.name] : p.default;
       const off = p.slot * 4;
-      if (Array.isArray(raw)) { for (let i = 0; i < 4; i++) data[off + i] = raw[i] ?? 0; }
+      if (p.type === 'texture2D') packTexture(data, off, raw, textures);
+      else if (Array.isArray(raw)) { for (let i = 0; i < 4; i++) data[off + i] = raw[i] ?? 0; }
       else data[off] = Number(raw) || 0;
     }
   }
@@ -136,6 +138,7 @@ export function hlslDeclarations(layer, stride = 1) {
   return layer.properties.map(p => {
     const s = `userParams[materialId*${stride} + ${p.slot}]`;
     switch (p.type) {
+      case 'texture2D': return `    float2 ${p.name} = ${s}.xy;`;
       case 'int': return `    int ${p.name} = (int)${s}.x;`;
       case 'bool': return `    bool ${p.name} = ${s}.x > 0.5;`;
       case 'float2': return `    float2 ${p.name} = ${s}.xy;`;
@@ -159,7 +162,7 @@ export function injectDeclarations(code, layer, stride = 1) {
 // maps native materialId -> panel material index; instances[panelIndex] =
 // { stackId, params:{layerId:{propName:value}} }. Each native material's region
 // starts at nativeId*stride and uses its assigned stack's local slot layout.
-export function packMaterialParams(library, instances, panelIndices, stride, nativeCount) {
+export function packMaterialParams(library, instances, panelIndices, stride, nativeCount, textures = new Map()) {
   const data = new Float32Array(Math.max(1, nativeCount * stride) * 4);
   for (let nativeId = 0; nativeId < nativeCount; nativeId++) {
     const panelIndex = panelIndices[nativeId];
@@ -174,10 +177,33 @@ export function packMaterialParams(library, instances, panelIndices, stride, nat
       for (const p of layer.properties) {
         const raw = values[p.name] !== undefined ? values[p.name] : p.default;
         const off = (base + p.slot) * 4;
-        if (Array.isArray(raw)) { for (let i = 0; i < 4; i++) data[off + i] = raw[i] ?? 0; }
+        if (p.type === 'texture2D') packTexture(data, off, raw, textures);
+        else if (Array.isArray(raw)) { for (let i = 0; i < 4; i++) data[off + i] = raw[i] ?? 0; }
         else data[off] = Number(raw) || 0;
       }
     }
   }
   return data;
+}
+
+function packTexture(data, offset, value, textures) {
+  const entry = textures.get(value?.texture);
+  // Unassigned = white; an unresolved/missing file = black, never texture zero.
+  data[offset] = value?.texture ? (entry?.index ?? -2) : -1;
+  data[offset + 1] = entry?.flipY ? 1 : 0;
+}
+
+export function shaderTexturePaths(library, instances) {
+  const paths = new Set();
+  for (const instance of instances || []) {
+    const stack = library?.[instance?.stackId - 1];
+    for (const layer of stack?.layers || []) {
+      if (layer.enabled === false) continue;
+      for (const prop of parseLayer(layer.code).properties) {
+        const value = instance.params?.[layer.id]?.[prop.name];
+        if (prop.type === 'texture2D' && typeof value?.texture === 'string' && value.texture) paths.add(value.texture);
+      }
+    }
+  }
+  return [...paths].sort();
 }
