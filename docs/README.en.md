@@ -16,9 +16,9 @@ Add custom HLSL functions, change their execution order, and **see the result im
 
 **`.shader`** stores the function composition and execution order; **`.shaderStack`** stores each function's code and property defaults. Saved functions can be reused across shaders, while property values remain independently adjustable for each material.
 
-[![Editing custom shader functions and previewing the stack on a sphere and character](images/shader-stacking-preview.jpg)](videos/shader-stacking-demo.mp4)
+[![Editing custom shader functions and previewing the stack on a sphere and character](https://i.ytimg.com/vi/1XLbQnIKI9s/hqdefault.jpg)](https://youtu.be/1XLbQnIKI9s)
 
-[▶ Watch the shader stacking demo (MP4 · 2 min 56 sec)](videos/shader-stacking-demo.mp4) · [Adding, saving, and reusing functions (Korean)](shader-stack.md)
+[▶ Watch the shader stacking demo on YouTube](https://youtu.be/1XLbQnIKI9s) · [Adding, saving, and reusing functions (Korean)](shader-stack.md)
 
 ## v0.9.1: Per-mesh selection outline
 

@@ -16,9 +16,9 @@ PMX（MMD）モデルをプレビューし、**FBX / USD に変換**するデス
 
 **`.shader`** は関数の組み合わせと実行順序を、**`.shaderStack`** は個々の関数のコードとプロパティの既定値を保存します。保存した関数は複数のシェーダーで再利用でき、プロパティの値はマテリアルごとに独立して調整できます。
 
-[![カスタムシェーダー関数を編集し、球体とキャラクターでスタックの結果を確認するデモ](images/shader-stacking-preview.jpg)](videos/shader-stacking-demo.mp4)
+[![カスタムシェーダー関数を編集し、球体とキャラクターでスタックの結果を確認するデモ](https://i.ytimg.com/vi/1XLbQnIKI9s/hqdefault.jpg)](https://youtu.be/1XLbQnIKI9s)
 
-[▶ シェーダースタックのデモを見る（MP4・2分56秒）](videos/shader-stacking-demo.mp4) · [関数の追加・保存・再利用（韓国語）](shader-stack.md)
+[▶ YouTube でシェーダースタックのデモを見る](https://youtu.be/1XLbQnIKI9s) · [関数の追加・保存・再利用（韓国語）](shader-stack.md)
 
 ## v0.9.1：メッシュ単位の選択アウトライン
 

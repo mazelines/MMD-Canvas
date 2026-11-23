@@ -16,9 +16,9 @@ PMX(MMD) 모델을 미리 보고 **FBX / USD로 변환**하는 데스크톱 앱�
 
 **`.shader`**는 함수 조합과 실행 순서를, **`.shaderStack`**은 개별 함수의 코드와 프로퍼티 기본값을 저장합니다. 저장한 함수는 여러 셰이더에서 재사용하고, 머티리얼별 프로퍼티 값은 독립적으로 조절할 수 있습니다.
 
-[![커스텀 셰이더 함수 편집과 스태킹 결과를 구체·캐릭터에서 확인하는 시연](docs/images/shader-stacking-preview.jpg)](docs/videos/shader-stacking-demo.mp4)
+[![커스텀 셰이더 함수 편집과 스태킹 결과를 구체·캐릭터에서 확인하는 시연](https://i.ytimg.com/vi/1XLbQnIKI9s/hqdefault.jpg)](https://youtu.be/1XLbQnIKI9s)
 
-[▶ 셰이더 스태킹 고도화 시연 보기 (MP4 · 2분 56초)](docs/videos/shader-stacking-demo.mp4) · [함수 추가·저장·재사용 방법](docs/shader-stack.md)
+[▶ YouTube에서 셰이더 스태킹 고도화 시연 보기](https://youtu.be/1XLbQnIKI9s) · [함수 추가·저장·재사용 방법](docs/shader-stack.md)
 
 ## v0.9.1: 메시 단위 선택 외곽선
 
