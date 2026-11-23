@@ -16,9 +16,9 @@
 
 **`.shader`** 保存函数组合和执行顺序，**`.shaderStack`** 保存单个函数的代码和属性默认值。已保存的函数可在多个着色器中复用，各材质的属性值仍可独立调整。
 
-[![编辑自定义着色器函数，并在球体和角色上预览堆栈效果](images/shader-stacking-preview.jpg)](videos/shader-stacking-demo.mp4)
+[![编辑自定义着色器函数，并在球体和角色上预览堆栈效果](https://i.ytimg.com/vi/1XLbQnIKI9s/hqdefault.jpg)](https://youtu.be/1XLbQnIKI9s)
 
-[▶ 观看着色器堆栈演示（MP4 · 2分56秒）](videos/shader-stacking-demo.mp4) · [函数的添加、保存与复用（韩语）](shader-stack.md)
+[▶ 在 YouTube 观看着色器堆栈演示](https://youtu.be/1XLbQnIKI9s) · [函数的添加、保存与复用（韩语）](shader-stack.md)
 
 ## v0.9.1：逐网格选择轮廓
 
